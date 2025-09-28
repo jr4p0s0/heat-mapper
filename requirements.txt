@@ -1,0 +1,72 @@
+# WiFi Heatmap Generator Pro v7 - Dependencias Python
+# Instalación: pip install -r requirements.txt
+
+# === DEPENDENCIAS CRÍTICAS ===
+# Necesarias para el funcionamiento básico de la aplicación
+
+# Procesamiento numérico y arrays
+numpy>=1.21.0
+
+# Visualización y gráficos
+matplotlib>=3.5.0
+
+# Interpolación científica para mapas de calor
+scipy>=1.7.0
+
+# Procesamiento de imágenes (planos de planta)
+Pillow>=8.3.0
+
+# === DEPENDENCIAS OPCIONALES ===
+# Mejoran la experiencia pero no son críticas
+
+# Interfaz gráfica moderna (ya incluida en Python 3.7+)
+tkinter - Incluida por defecto en Python
+
+# === DEPENDENCIAS DE DESARROLLO ===
+# Solo necesarias para desarrollo y pruebas
+
+# Formateo de código (opcional)
+# black>=22.0.0
+
+# Linting (opcional)  
+# flake8>=4.0.0
+
+# Testing (opcional)
+# pytest>=7.0.0
+
+# === NOTAS DE INSTALACIÓN ===
+# 
+# INSTALACIÓN BÁSICA:
+# pip install -r requirements.txt
+#
+# INSTALACIÓN CON USUARIO (si hay problemas de permisos):
+# pip install --user -r requirements.txt
+#
+# ACTUALIZAR DEPENDENCIAS:
+# pip install --upgrade -r requirements.txt
+#
+# VERIFICAR INSTALACIÓN:
+# pip list
+#
+# === COMPATIBILIDAD ===
+# Python: >= 3.7
+# Sistemas: Windows, Linux, macOS
+#
+# === DEPENDENCIAS EXTERNAS (NO PYTHON) ===
+# Estas NO se instalan con pip, deben instalarse por separado:
+#
+# WINDOWS:
+# - netsh (incluido en Windows)
+# - wmic (incluido en Windows)  
+# - iperf3 (opcional): winget install iperf3
+#
+# LINUX:
+# - iwconfig: sudo apt install wireless-tools
+# - iw: sudo apt install iw
+# - nmcli: sudo apt install network-manager
+# - iperf3 (opcional): sudo apt install iperf3
+#
+# MACOS:
+# - airport (incluido en macOS)
+# - system_profiler (incluido en macOS)
+# - iperf3 (opcional): brew install iperf3

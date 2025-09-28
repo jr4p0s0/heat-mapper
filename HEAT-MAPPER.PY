@@ -326,8 +326,7 @@ class WiFiHeatmapGenerator:
         dl_mbps, ul_mbps = None, None
         try:
             # Test de Descarga
-            print(f"Ejecutando iperf3 (descarga) contra el servidor {
-                  server_ip}...")
+            print(f"Ejecutando iperf3 (descarga) contra el servidor {server_ip}...")
             dl_cmd = ["iperf3", "-c", server_ip, "-J", "-t", "5"]
             result_dl = subprocess.run(
                 dl_cmd, capture_output=True, text=True, timeout=15, check=True)
@@ -337,8 +336,7 @@ class WiFiHeatmapGenerator:
             print(f"-> Velocidad de Descarga: {dl_mbps} Mbps")
 
             # Test de Subida
-            print(f"Ejecutando iperf3 (subida) contra el servidor {
-                  server_ip}...")
+            print(f"Ejecutando iperf3 (subida) contra el servidor {server_ip}...") 
             ul_cmd = ["iperf3", "-c", server_ip, "-J", "-t", "5", "-R"]
             result_ul = subprocess.run(
                 ul_cmd, capture_output=True, text=True, timeout=15, check=True)
@@ -378,8 +376,7 @@ class WiFiHeatmapGenerator:
         count = point.get_measurement_count(band)
         avg_dl = point.get_average_speed(band, 'dl')
         avg_ul = point.get_average_speed(band, 'ul')
-        print(f"[Medición] Punto ID: {point.id} | Banda: {band}GHz | RSSI: {
-              rssi}dBm | DL: {dl_speed} Mbps | UL: {ul_speed} Mbps")
+        print(f"[Medición] Punto ID: {point.id} | Banda: {band}GHz | RSSI: {rssi}dBm | DL: {dl_speed} Mbps | UL: {ul_speed} Mbps")
         print(
             f"  -> Promedios ({count}x): RSSI: {avg_rssi}dBm | DL: {avg_dl} Mbps | UL: {avg_ul} Mbps")
 
@@ -418,8 +415,7 @@ class WiFiHeatmapGenerator:
                     ax.text(p.x, p.y, str(p.id), fontsize=9, ha='center',
                             va='center', color='white', weight='bold')
 
-            ax.set_title(f'Mapa de Calor WiFi - Banda {band} GHz\nSSID: {
-                         self.current_ssid}', fontsize=14, weight='bold')
+            ax.set_title(f'Mapa de Calor WiFi - Banda {band} GHz\nSSID: {self.current_ssid}', fontsize=14, weight='bold')
             ax.set_xlabel('Posición X (píxeles)', fontsize=12)
             ax.set_ylabel('Posición Y (píxeles)', fontsize=12)
             ax.set_xlim(0, self.floor_plan_dims[0])
@@ -781,8 +777,7 @@ class WiFiMapperGUI:
             self.generator.floor_plan_dims = (new_width, new_height)
             self.redraw_all_points()
 
-            messagebox.showinfo("Éxito", f"Plano cargado correctamente\nDimensiones: {
-                                new_width}x{new_height}")
+            messagebox.showinfo("Éxito", f"Plano cargado correctamente\nDimensiones: {new_width}x{new_height}")
 
         except Exception as e:
             messagebox.showerror(
@@ -892,8 +887,7 @@ class WiFiMapperGUI:
                     self.redraw_all_points()
                     self.highlight_selected_point()
                     self.update_point_info()
-                    self.count_label.config(text=f"Puntos totales: {
-                                            len(self.generator.measurement_points)}")
+                    self.count_label.config(text=f"Puntos totales: {len(self.generator.measurement_points)}")
 
                 elif msg_type == 'error':
                     messagebox.showerror("Error de Medición", message[1])
@@ -1024,8 +1018,7 @@ class WiFiMapperGUI:
         if len(valid_points) < 4:
             messagebox.showwarning(
                 "Datos Insuficientes",
-                f"Se necesitan al menos 4 puntos con mediciones para la banda {
-                    band} GHz.\n"
+                f"Se necesitan al menos 4 puntos con mediciones para la banda {band} GHz.\n"
                 f"Actualmente tienes {len(valid_points)} puntos válidos."
             )
             return
@@ -1050,8 +1043,7 @@ class WiFiMapperGUI:
                 )
                 messagebox.showinfo(
                     "Éxito",
-                    f"Mapa de calor generado y guardado exitosamente:\n{
-                        save_path}"
+                    f"Mapa de calor generado y guardado exitosamente:\n{save_path}"
                 )
             except Exception as e:
                 messagebox.showerror(
@@ -1078,8 +1070,7 @@ class WiFiMapperGUI:
                 messagebox.showinfo(
                     "Éxito",
                     f"Datos guardados exitosamente:\n{file_path}\n\n"
-                    f"Puntos guardados: {
-                        len(self.generator.measurement_points)}"
+                    f"Puntos guardados: {len(self.generator.measurement_points)}"
                 )
             except Exception as e:
                 messagebox.showerror(
@@ -1101,8 +1092,7 @@ class WiFiMapperGUI:
                 # Actualizar interfaz
                 self.redraw_all_points()
                 self.count_label.config(
-                    text=f"Puntos totales: {
-                        len(self.generator.measurement_points)}"
+                    text=f"Puntos totales: {len(self.generator.measurement_points)}"
                 )
                 self.ssid_label.config(
                     text=f"SSID: {self.generator.current_ssid}")
@@ -1114,8 +1104,7 @@ class WiFiMapperGUI:
                 messagebox.showinfo(
                     "Éxito",
                     f"Datos cargados exitosamente:\n{file_path}\n\n"
-                    f"Puntos cargados: {
-                        len(self.generator.measurement_points)}\n"
+                    f"Puntos cargados: {len(self.generator.measurement_points)}\n"
                     f"SSID: {self.generator.current_ssid}"
                 )
 
@@ -1133,8 +1122,7 @@ class WiFiMapperGUI:
 
         result = messagebox.askyesno(
             "Confirmar Limpieza",
-            f"¿Estás seguro de que deseas eliminar todos los {
-                len(self.generator.measurement_points)} puntos de medición?\n\n"
+            f"¿Estás seguro de que deseas eliminar todos los {len(self.generator.measurement_points)} puntos de medición?\n\n"
             "Esta acción no se puede deshacer."
         )
 
@@ -1157,8 +1145,7 @@ class WiFiMapperGUI:
         print("\n" + "="*70)
         print("🌐 WiFi Heatmap Generator Pro v7 - Multiplataforma")
         print("="*70)
-        print(f"🖥️  Sistema Operativo: {
-              platform.system()} {platform.release()}")
+        print(f"🖥️  Sistema Operativo: {platform.system()} {platform.release()}")
         print(f"🐍 Python: {platform.python_version()}")
         print(f"📡 Detección WiFi: Habilitada para {platform.system()}")
         print("="*70)

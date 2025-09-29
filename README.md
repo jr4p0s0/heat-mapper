@@ -202,17 +202,6 @@ ls /System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resou
 4. Push a la rama (`git push origin feature/AmazingFeature`)  
 5. Abrir Pull Request
 
-## 📝 Historial de Versiones
-
-- **v7.0**: Compatibilidad multiplataforma + interfaz moderna
-- **v6.0**: Integración iperf3 + muestreo automático  
-- **v5.0**: Mapas de calor mejorados
-- **v4.0**: Interfaz gráfica básica
-
 ## 📄 Licencia
 
 Este proyecto está bajo la Licencia MIT. Ver `LICENSE` para más detalles.
-
----
-
-**🌟 ¿Te gusta el proyecto? ¡Deja una estrella!**

@@ -25,7 +25,7 @@ from collections import defaultdict
 import threading
 from queue import Queue
 import time
-
+import iperf3
 
 class MeasurementPoint:
     def __init__(self, point_id, x, y):
@@ -321,47 +321,59 @@ class WiFiHeatmapGenerator:
             print(f"-> Método /proc/net/wireless Linux falló: {e}")
 
         return None, "No se pudo obtener información WiFi en Linux", None
-
+    
     def get_wifi_speed(self, server_ip):
-        """Ejecuta iperf3 para obtener velocidad de descarga y subida."""
+        """Ejecuta iperf3 usando la librería de Python para obtener velocidad."""
         dl_mbps, ul_mbps = None, None
+        
         try:
-            # Test de Descarga
+            # Test de Descarga (servidor envía al cliente)
             print(f"Ejecutando iperf3 (descarga) contra el servidor {server_ip}...")
-            dl_cmd = ["iperf3", "-c", server_ip, "-J", "-t", "5"]
-            result_dl = subprocess.run(
-                dl_cmd, capture_output=True, text=True, timeout=15, check=True)
-            data_dl = json.loads(result_dl.stdout)
-            dl_mbps = round(data_dl['end']['sum_received']
-                            ['bits_per_second'] / 1_000_000, 2)
+            client = iperf3.Client()
+            client.server_hostname = server_ip
+            client.port = 5201
+            client.duration = 5
+            client.protocol = 'tcp'
+            client.reverse = True  # Servidor envía, cliente recibe (descarga)
+            
+            result_dl = client.run()
+            
+            if result_dl.error:
+                return None, f"Error en test de descarga: {result_dl.error}"
+            
+            dl_mbps = round(result_dl.received_Mbps, 2)
             print(f"-> Velocidad de Descarga: {dl_mbps} Mbps")
-
-            # Test de Subida
-            print(f"Ejecutando iperf3 (subida) contra el servidor {server_ip}...") 
-            ul_cmd = ["iperf3", "-c", server_ip, "-J", "-t", "5", "-R"]
-            result_ul = subprocess.run(
-                ul_cmd, capture_output=True, text=True, timeout=15, check=True)
-            data_ul = json.loads(result_ul.stdout)
-            ul_mbps = round(data_ul['end']['sum_sent']
-                            ['bits_per_second'] / 1_000_000, 2)
+            
+            # Test de Subida (cliente envía al servidor)
+            print(f"Ejecutando iperf3 (subida) contra el servidor {server_ip}...")
+            client2 = iperf3.Client()
+            client2.server_hostname = server_ip
+            client2.port = 5201
+            client2.duration = 5
+            client2.protocol = 'tcp'
+            client2.reverse = False  # Cliente envía, servidor recibe (subida)
+            
+            result_ul = client2.run()
+            
+            if result_ul.error:
+                return None, f"Error en test de subida: {result_ul.error}"
+            
+            ul_mbps = round(result_ul.sent_Mbps, 2)
             print(f"-> Velocidad de Subida: {ul_mbps} Mbps")
-
-        except FileNotFoundError:
-            return None, "Error: 'iperf3' no encontrado. Asegúrate de que está instalado."
-        except subprocess.CalledProcessError as e:
-            error_info = "Asegúrate de que el servidor iperf3 está corriendo y es accesible."
-            try:
-                error_json = json.loads(e.stdout)
-                if 'error' in error_json:
-                    error_info = error_json['error']
-            except json.JSONDecodeError:
-                error_info = e.stderr or e.stdout
-            return None, f"Error de iperf3: {error_info}"
+            
         except Exception as e:
-            return None, f"Error inesperado durante el test de velocidad: {e}"
-
+            error_msg = str(e)
+            if "Connection refused" in error_msg:
+                return None, "Error: No se puede conectar al servidor iperf3. Asegúrate de que está corriendo."
+            elif "No route to host" in error_msg:
+                return None, "Error: No se puede alcanzar el servidor. Verifica la IP y la conexión de red."
+            elif "timed out" in error_msg or "timeout" in error_msg.lower():
+                return None, "Error: Tiempo de espera agotado. El servidor puede no estar respondiendo."
+            else:
+                return None, f"Error inesperado durante el test de velocidad: {error_msg}"
+        
         return (dl_mbps, ul_mbps), None
-
+    
     def create_or_update_point(self, x, y):
         for pid, p in self.measurement_points.items():
             if np.sqrt((p.x - x)**2 + (p.y - y)**2) < 15:
@@ -1335,10 +1347,11 @@ if __name__ == "__main__":
         import numpy as np
         import scipy.interpolate
         from PIL import Image
+        import iperf3
     except ImportError as e:
         print(f"❌ Error: Falta una dependencia crítica: {e}")
         print("\n📦 Para instalar las dependencias necesarias, ejecuta:")
-        print("   pip install matplotlib numpy scipy pillow")
+        print("   pip install matplotlib numpy scipy pillow iperf3")
         sys.exit(1)
 
     # Mostrar información del sistema

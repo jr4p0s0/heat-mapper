@@ -72,7 +72,9 @@ sudo yum install iperf3  # o dnf install iperf3
 
 #### macOS
 ```bash
-# Herramientas incluidas por defecto
+# Instalar homebrew:
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
 # Para iperf3 (opcional):
 brew install iperf3
 ```

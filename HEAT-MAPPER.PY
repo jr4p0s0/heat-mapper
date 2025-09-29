@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-WiFi Heatmap Generator Pro - v7 Multiplataforma y Moderno
+WiFi Heatmap Generator Pro
 - AÑADIDO: Compatibilidad completa con Windows, Linux y macOS
 - AÑADIDO: Interfaz moderna con mejor diseño y colores
 - MEJORADO: Detección de WiFi robusta para todos los sistemas operativos
 - MANTENIDO: Todas las funcionalidades originales (iperf3, muestreo automático, etc.)
+- TO-DO: Implementar iperf3 como librería de python en vez de instalarlo en el host
 """
 
 import subprocess

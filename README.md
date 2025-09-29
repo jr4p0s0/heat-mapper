@@ -84,7 +84,7 @@ brew install iperf3
 pip install matplotlib numpy scipy pillow
 
 # Ejecutar
-python heapMap-jc.py
+python HEAT-MAPPER.py
 ```
 
 ### 2️⃣ Uso Básico

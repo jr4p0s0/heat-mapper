@@ -489,59 +489,59 @@ class WiFiHeatmapGenerator:
             self.measurement_points[p.id] = p
             self.next_point_id = max(self.next_point_id, p.id + 1)
 
-def plot_speed_heatmap_on_floor_plan(self, band, speed_direction='dl', floor_plan_path=None, save_path=None):
-    """Genera y guarda un mapa de calor basado en velocidad de internet."""
-    fig, ax = plt.subplots(1, 1, figsize=(12, 9))
-    fig.patch.set_facecolor('#f0f0f0')
-    
-    if floor_plan_path and os.path.exists(floor_plan_path):
-        floor_img = plt.imread(floor_plan_path)
-        ax.imshow(floor_img, extent=[0, self.floor_plan_dims[0], self.floor_plan_dims[1], 0], aspect='auto')
-    
-    try:
-        xi, yi, zi = self.generate_heatmap_data(band, data_type='speed', speed_direction=speed_direction)
+    def plot_speed_heatmap_on_floor_plan(self, band, speed_direction='dl', floor_plan_path=None, save_path=None):
+        """Genera y guarda un mapa de calor basado en velocidad de internet."""
+        fig, ax = plt.subplots(1, 1, figsize=(12, 9))
+        fig.patch.set_facecolor('#f0f0f0')
         
-        # Determinar rango de valores para la escala de colores
-        # Ajustar según el tipo de conexión esperada
-        if band == '2.4':
-            vmin, vmax = 0, 100  # 2.4GHz típicamente hasta 100 Mbps
-        else:
-            vmin, vmax = 0, 300  # 5GHz puede alcanzar velocidades más altas
+        if floor_plan_path and os.path.exists(floor_plan_path):
+            floor_img = plt.imread(floor_plan_path)
+            ax.imshow(floor_img, extent=[0, self.floor_plan_dims[0], self.floor_plan_dims[1], 0], aspect='auto')
         
-        # Usar colormap diferente para velocidad (verde = rápido, rojo = lento)
-        im = ax.contourf(xi, yi, zi, levels=15, cmap='RdYlGn', vmin=vmin, vmax=vmax, alpha=0.6)
+        try:
+            xi, yi, zi = self.generate_heatmap_data(band, data_type='speed', speed_direction=speed_direction)
+            
+            # Determinar rango de valores para la escala de colores
+            # Ajustar según el tipo de conexión esperada
+            if band == '2.4':
+                vmin, vmax = 0, 100  # 2.4GHz típicamente hasta 100 Mbps
+            else:
+                vmin, vmax = 0, 300  # 5GHz puede alcanzar velocidades más altas
+            
+            # Usar colormap diferente para velocidad (verde = rápido, rojo = lento)
+            im = ax.contourf(xi, yi, zi, levels=15, cmap='RdYlGn', vmin=vmin, vmax=vmax, alpha=0.6)
+            
+            # Mostrar puntos de medición
+            for p in self.measurement_points.values():
+                speed_val = p.get_average_speed(band, speed_direction)
+                if speed_val is not None:
+                    ax.plot(p.x, p.y, 'ko', markersize=10, markeredgecolor='white', markeredgewidth=2)
+                    ax.text(p.x, p.y, str(p.id), fontsize=9, ha='center', va='center', color='white', weight='bold')
+            
+            # Título descriptivo
+            direction_text = "Descarga" if speed_direction == 'dl' else "Subida"
+            ax.set_title(f'Mapa de Calor - Velocidad de {direction_text}\nBanda {band} GHz | SSID: {self.current_ssid}', 
+                        fontsize=14, weight='bold')
+            ax.set_xlabel('Posición X (píxeles)', fontsize=12)
+            ax.set_ylabel('Posición Y (píxeles)', fontsize=12)
+            ax.set_xlim(0, self.floor_plan_dims[0])
+            ax.set_ylim(self.floor_plan_dims[1], 0)
+            
+            # Barra de colores con unidades Mbps
+            cbar = plt.colorbar(im, ax=ax, orientation='vertical', pad=0.01)
+            cbar.set_label('Velocidad (Mbps)', fontsize=12)
+            ax.grid(True, alpha=0.2, linestyle='--')
+            
+        except ValueError as e:
+            ax.text(0.5, 0.5, f'Datos de velocidad insuficientes para la banda {band} GHz\n({e})',
+                    ha='center', va='center', transform=ax.transAxes, fontsize=12, color='red')
+            ax.set_title(f'Banda {band} GHz - Velocidad - Error', fontsize=14)
         
-        # Mostrar puntos de medición
-        for p in self.measurement_points.values():
-            speed_val = p.get_average_speed(band, speed_direction)
-            if speed_val is not None:
-                ax.plot(p.x, p.y, 'ko', markersize=10, markeredgecolor='white', markeredgewidth=2)
-                ax.text(p.x, p.y, str(p.id), fontsize=9, ha='center', va='center', color='white', weight='bold')
-        
-        # Título descriptivo
-        direction_text = "Descarga" if speed_direction == 'dl' else "Subida"
-        ax.set_title(f'Mapa de Calor - Velocidad de {direction_text}\nBanda {band} GHz | SSID: {self.current_ssid}', 
-                    fontsize=14, weight='bold')
-        ax.set_xlabel('Posición X (píxeles)', fontsize=12)
-        ax.set_ylabel('Posición Y (píxeles)', fontsize=12)
-        ax.set_xlim(0, self.floor_plan_dims[0])
-        ax.set_ylim(self.floor_plan_dims[1], 0)
-        
-        # Barra de colores con unidades Mbps
-        cbar = plt.colorbar(im, ax=ax, orientation='vertical', pad=0.01)
-        cbar.set_label('Velocidad (Mbps)', fontsize=12)
-        ax.grid(True, alpha=0.2, linestyle='--')
-        
-    except ValueError as e:
-        ax.text(0.5, 0.5, f'Datos de velocidad insuficientes para la banda {band} GHz\n({e})',
-                ha='center', va='center', transform=ax.transAxes, fontsize=12, color='red')
-        ax.set_title(f'Banda {band} GHz - Velocidad - Error', fontsize=14)
-    
-    plt.tight_layout()
-    if save_path:
-        plt.savefig(save_path, dpi=200, bbox_inches='tight')
-        print(f"✅ Mapa de velocidad guardado: {save_path}")
-    plt.show()
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=200, bbox_inches='tight')
+            print(f"✅ Mapa de velocidad guardado: {save_path}")
+        plt.show()
 
 
 class WiFiMapperGUI:

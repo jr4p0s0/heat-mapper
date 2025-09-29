@@ -381,14 +381,30 @@ class WiFiHeatmapGenerator:
         print(
             f"  -> Promedios ({count}x): RSSI: {avg_rssi}dBm | DL: {avg_dl} Mbps | UL: {avg_ul} Mbps")
 
-    def generate_heatmap_data(self, band, resolution=100):
-        valid_points = [p for p in self.measurement_points.values(
-        ) if p.get_average_rssi(band) is not None]
-        if len(valid_points) < 4:
-            raise ValueError(
-                f"Se necesitan al menos 4 puntos para la banda {band} GHz.")
+    def generate_heatmap_data(self, band, data_type='rssi', speed_direction='dl', resolution=100):
+        """
+        Genera datos de mapa de calor para RSSI o velocidad.
+        
+        Args:
+            band: '2.4' o '5' para la banda de frecuencia
+            data_type: 'rssi' para señal, 'speed' para velocidad
+            speed_direction: 'dl' para descarga, 'ul' para subida (solo si data_type='speed')
+            resolution: resolución de la grilla de interpolación
+        """
+        if data_type == 'rssi':
+            valid_points = [p for p in self.measurement_points.values() 
+                        if p.get_average_rssi(band) is not None]
+            if len(valid_points) < 4:
+                raise ValueError(f"Se necesitan al menos 4 puntos con RSSI para la banda {band} GHz.")
+            values = np.array([p.get_average_rssi(band) for p in valid_points])
+        else:  # speed
+            valid_points = [p for p in self.measurement_points.values() 
+                        if p.get_average_speed(band, speed_direction) is not None]
+            if len(valid_points) < 4:
+                raise ValueError(f"Se necesitan al menos 4 puntos con velocidad para la banda {band} GHz.")
+            values = np.array([p.get_average_speed(band, speed_direction) for p in valid_points])
+        
         points = np.array([[p.x, p.y] for p in valid_points])
-        values = np.array([p.get_average_rssi(band) for p in valid_points])
         xi = np.linspace(0, self.floor_plan_dims[0], resolution)
         yi = np.linspace(0, self.floor_plan_dims[1], resolution)
         xi, yi = np.meshgrid(xi, yi)
@@ -472,6 +488,60 @@ class WiFiHeatmapGenerator:
             p.measurements_ul_5 = pd.get('ul_5', [])
             self.measurement_points[p.id] = p
             self.next_point_id = max(self.next_point_id, p.id + 1)
+
+def plot_speed_heatmap_on_floor_plan(self, band, speed_direction='dl', floor_plan_path=None, save_path=None):
+    """Genera y guarda un mapa de calor basado en velocidad de internet."""
+    fig, ax = plt.subplots(1, 1, figsize=(12, 9))
+    fig.patch.set_facecolor('#f0f0f0')
+    
+    if floor_plan_path and os.path.exists(floor_plan_path):
+        floor_img = plt.imread(floor_plan_path)
+        ax.imshow(floor_img, extent=[0, self.floor_plan_dims[0], self.floor_plan_dims[1], 0], aspect='auto')
+    
+    try:
+        xi, yi, zi = self.generate_heatmap_data(band, data_type='speed', speed_direction=speed_direction)
+        
+        # Determinar rango de valores para la escala de colores
+        # Ajustar según el tipo de conexión esperada
+        if band == '2.4':
+            vmin, vmax = 0, 100  # 2.4GHz típicamente hasta 100 Mbps
+        else:
+            vmin, vmax = 0, 300  # 5GHz puede alcanzar velocidades más altas
+        
+        # Usar colormap diferente para velocidad (verde = rápido, rojo = lento)
+        im = ax.contourf(xi, yi, zi, levels=15, cmap='RdYlGn', vmin=vmin, vmax=vmax, alpha=0.6)
+        
+        # Mostrar puntos de medición
+        for p in self.measurement_points.values():
+            speed_val = p.get_average_speed(band, speed_direction)
+            if speed_val is not None:
+                ax.plot(p.x, p.y, 'ko', markersize=10, markeredgecolor='white', markeredgewidth=2)
+                ax.text(p.x, p.y, str(p.id), fontsize=9, ha='center', va='center', color='white', weight='bold')
+        
+        # Título descriptivo
+        direction_text = "Descarga" if speed_direction == 'dl' else "Subida"
+        ax.set_title(f'Mapa de Calor - Velocidad de {direction_text}\nBanda {band} GHz | SSID: {self.current_ssid}', 
+                    fontsize=14, weight='bold')
+        ax.set_xlabel('Posición X (píxeles)', fontsize=12)
+        ax.set_ylabel('Posición Y (píxeles)', fontsize=12)
+        ax.set_xlim(0, self.floor_plan_dims[0])
+        ax.set_ylim(self.floor_plan_dims[1], 0)
+        
+        # Barra de colores con unidades Mbps
+        cbar = plt.colorbar(im, ax=ax, orientation='vertical', pad=0.01)
+        cbar.set_label('Velocidad (Mbps)', fontsize=12)
+        ax.grid(True, alpha=0.2, linestyle='--')
+        
+    except ValueError as e:
+        ax.text(0.5, 0.5, f'Datos de velocidad insuficientes para la banda {band} GHz\n({e})',
+                ha='center', va='center', transform=ax.transAxes, fontsize=12, color='red')
+        ax.set_title(f'Banda {band} GHz - Velocidad - Error', fontsize=14)
+    
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=200, bbox_inches='tight')
+        print(f"✅ Mapa de velocidad guardado: {save_path}")
+    plt.show()
 
 
 class WiFiMapperGUI:
@@ -694,33 +764,122 @@ class WiFiMapperGUI:
         self.point_info_label.pack(anchor=tk.W)
 
     def create_map_section(self, parent):
-        """Crea la sección de generación de mapas"""
-        map_frame = ttk.LabelFrame(parent, text="🗺️ Generar Mapa de Calor",
-                                   style='Modern.TLabelframe', padding=12)
+        """Crea la sección de generación de mapas con soporte para mapas de velocidad"""
+        map_frame = ttk.LabelFrame(parent, text="🗺️ Generar Mapas de Calor",
+                                style='Modern.TLabelframe', padding=12)
         map_frame.pack(fill=tk.X, pady=(0, 10))
-
+        
+        # Selección de banda
         ttk.Label(map_frame, text="Banda de frecuencia:",
-                  style='Modern.TLabel',
-                  font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W, pady=(0, 5))
-
+                style='Modern.TLabel',
+                font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W, pady=(0, 5))
+        
         self.band_var = tk.StringVar(value="2.4")
         band_frame = ttk.Frame(map_frame, style='Modern.TFrame')
         band_frame.pack(fill=tk.X, pady=(0, 10))
-
+        
         ttk.Radiobutton(band_frame, text="📶 2.4 GHz",
                         variable=self.band_var, value="2.4",
                         style='Modern.TRadiobutton').pack(side=tk.LEFT)
         ttk.Radiobutton(band_frame, text="📡 5 GHz",
                         variable=self.band_var, value="5",
                         style='Modern.TRadiobutton').pack(side=tk.LEFT, padx=(20, 0))
-
-        ttk.Button(map_frame, text="🎨 Generar Mapa de Calor",
-                   command=self.generate_map,
-                   style='Success.TButton').pack(fill=tk.X, pady=(0, 5))
-
+        
+        # Separador
+        ttk.Separator(map_frame, orient='horizontal').pack(fill=tk.X, pady=10)
+        
+        # Botón para mapa de RSSI (señal)
+        ttk.Button(map_frame, text="📊 Generar Mapa de Señal (RSSI)",
+                command=self.generate_map,
+                style='Success.TButton').pack(fill=tk.X, pady=(0, 5))
+        
+        # Frame para mapas de velocidad
+        speed_frame = ttk.LabelFrame(map_frame, text="⚡ Mapas de Velocidad",
+                                    style='Modern.TLabelframe', padding=8)
+        speed_frame.pack(fill=tk.X, pady=(5, 10))
+        
+        # Selección de tipo de velocidad
+        self.speed_direction_var = tk.StringVar(value="dl")
+        ttk.Radiobutton(speed_frame, text="⬇️ Descarga",
+                        variable=self.speed_direction_var, value="dl",
+                        style='Modern.TRadiobutton').pack(anchor=tk.W)
+        ttk.Radiobutton(speed_frame, text="⬆️ Subida",
+                        variable=self.speed_direction_var, value="ul",
+                        style='Modern.TRadiobutton').pack(anchor=tk.W)
+        
+        # Botón para generar mapa de velocidad
+        ttk.Button(speed_frame, text="🚀 Generar Mapa de Velocidad",
+                command=self.generate_speed_map,
+                style='Success.TButton').pack(fill=tk.X, pady=(5, 0))
+        
+        # Nota informativa
+        info_text = "Nota: Los mapas de velocidad requieren\nmediciones con iperf3 activado"
+        ttk.Label(speed_frame, text=info_text,
+                style='Modern.TLabel',
+                font=('Segoe UI', 8),
+                foreground='#95a5a6').pack(pady=(5, 0))
+        
+        # Separador
+        ttk.Separator(map_frame, orient='horizontal').pack(fill=tk.X, pady=10)
+        
+        # Botón para limpiar todos los puntos
         ttk.Button(map_frame, text="🧹 Limpiar Todos los Puntos",
-                   command=self.clear_all,
-                   style='Modern.TButton').pack(fill=tk.X)
+                command=self.clear_all,
+                style='Modern.TButton').pack(fill=tk.X)
+
+
+    def generate_speed_map(self):
+        """Genera y muestra el mapa de calor de velocidad"""
+        band = self.band_var.get()
+        speed_direction = self.speed_direction_var.get()
+        
+        # Verificar que hay datos suficientes
+        valid_points = [p for p in self.generator.measurement_points.values()
+                        if p.get_average_speed(band, speed_direction) is not None]
+        
+        if len(valid_points) < 4:
+            direction_text = "descarga" if speed_direction == 'dl' else "subida"
+            messagebox.showwarning(
+                "Datos Insuficientes",
+                f"Se necesitan al menos 4 puntos con mediciones de velocidad de {direction_text} "
+                f"para la banda {band} GHz.\n\n"
+                f"Actualmente tienes {len(valid_points)} puntos válidos.\n\n"
+                f"Asegúrate de:\n"
+                f"1. Tener iperf3 activado al medir\n"
+                f"2. Tener el servidor iperf3 funcionando\n"
+                f"3. Haber realizado mediciones en la banda seleccionada"
+            )
+            return
+        
+        # Solicitar ubicación para guardar
+        direction_text = "Descarga" if speed_direction == 'dl' else "Subida"
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[
+                ("PNG", "*.png"),
+                ("PDF", "*.pdf"),
+                ("SVG", "*.svg")
+            ],
+            title=f"Guardar Mapa de Velocidad - {direction_text} - Banda {band} GHz"
+        )
+        
+        if save_path:
+            try:
+                self.generator.plot_speed_heatmap_on_floor_plan(
+                    band=band,
+                    speed_direction=speed_direction,
+                    floor_plan_path=self.floor_image_path,
+                    save_path=save_path
+                )
+                messagebox.showinfo(
+                    "Éxito",
+                    f"Mapa de velocidad ({direction_text}) generado y guardado exitosamente:\n{save_path}"
+                )
+            except Exception as e:
+                messagebox.showerror(
+                    "Error al Generar Mapa",
+                    f"No se pudo generar el mapa de velocidad:\n{str(e)}"
+                )
 
     def create_status_section(self, parent):
         """Crea la sección de estado general"""

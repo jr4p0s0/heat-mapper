@@ -80,7 +80,13 @@ def install_windows_dependencies():
     
     # Intentar instalar iperf3 con winget
     if run_command("winget --version", "Verificando winget", check=False):
-        run_command("winget install iperf3", "Instalando iperf3 (opcional)", check=False)
+	# Instalar iperf3 desde winget de forma silenciosa
+	subprocess.run([
+    		"winget", "install", "iperf3",
+    		"--silent",
+		"--accept-package-agreements",
+		"--accept-source-agreements"
+	], check=True)
     else:
         print("⚠️  winget no disponible. Instala iperf3 manualmente desde: https://iperf.fr/")
 
@@ -100,7 +106,7 @@ def install_linux_dependencies():
         run_command("sudo apt update", "Actualizando repositorios", check=False)
         run_command("sudo apt install -y wireless-tools iw network-manager", 
                    "Instalando herramientas WiFi", check=False)
-        run_command("sudo apt install -y iperf3", "Instalando iperf3 (opcional)", check=False)
+        run_command("sudo apt-get install -y iperf3", "Instalando iperf3 (opcional)", check=False)
         
     elif "fedora" in os_info or "rhel" in os_info or "centos" in os_info:
         print("📋 Sistema RedHat/Fedora detectado")

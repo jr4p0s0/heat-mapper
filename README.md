@@ -1,5 +1,7 @@
-# 🌐 WiFi Heatmap Generator Pro v7
+# 🌐 WiFi Heatmap Generator
 
+Desarrollado por Juan Carlos Valera y Jaime Raposo.
+---
 Generador de mapas de calor WiFi multiplataforma con interfaz moderna. Compatible con **Windows**, **Linux** y **macOS**.
 
 ![Python](https://img.shields.io/badge/python-v3.7+-blue.svg)

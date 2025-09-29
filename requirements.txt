@@ -20,7 +20,7 @@ Pillow>=8.3.0
 # Mejoran la experiencia pero no son críticas
 
 # Interfaz gráfica moderna (ya incluida en Python 3.7+)
-tkinter - Incluida por defecto en Python
+# tkinter - Incluida por defecto en Python
 
 # === DEPENDENCIAS DE DESARROLLO ===
 # Solo necesarias para desarrollo y pruebas

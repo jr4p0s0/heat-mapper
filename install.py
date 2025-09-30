@@ -51,7 +51,9 @@ def install_python_dependencies():
         "matplotlib",
         "numpy", 
         "scipy",
-        "pillow"
+        "pillow",
+        "seaborn",
+        "iperf3"
     ]
     
     print("\n📦 Instalando dependencias de Python...")

@@ -16,6 +16,9 @@ scipy>=1.7.0
 # Procesamiento de imágenes (planos de planta)
 Pillow>=8.3.0
 
+# Medición de velocidad de tranmisión 
+iperf3
+
 # === DEPENDENCIAS OPCIONALES ===
 # Mejoran la experiencia pero no son críticas
 

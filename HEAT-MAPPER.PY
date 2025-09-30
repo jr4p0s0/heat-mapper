@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-WiFi Heatmap Generator Pro - Actualización con mapas de velocidad mejorados
-- AÑADIDO: Seaborn para mejores paletas de colores
-- MEJORADO: Mapas de velocidad combinados (descarga + subida) en una sola imagen
-- SIMPLIFICADO: Interfaz con un solo botón para mapas de velocidad
+WiFi Heatmap Generator Pro - Con medición de ruido y análisis SNR
+- AÑADIDO: Medición de ruido de fondo
+- AÑADIDO: Mapas de ruido y SNR
+- AÑADIDO: Análisis de correlación velocidad-SNR
+- MEJORADO: Mejor análisis de calidad de señal
 """
 
 import subprocess
@@ -24,7 +25,7 @@ import threading
 from queue import Queue
 import time
 import iperf3
-import seaborn as sns  # NUEVO: Importar seaborn para mejores colores
+import seaborn as sns
 
 # Configurar seaborn
 sns.set_style("whitegrid")
@@ -44,16 +45,23 @@ class MeasurementPoint:
         self.measurements_ul_24 = []
         self.measurements_dl_5 = []
         self.measurements_ul_5 = []
+        # NUEVO: Listas para Ruido
+        self.noise_24 = []
+        self.noise_5 = []
 
-    def add_measurement(self, rssi, band, dl_speed=None, ul_speed=None):
+    def add_measurement(self, rssi, band, dl_speed=None, ul_speed=None, noise=None):
         if band == '2.4':
             self.measurements_24.append(rssi)
+            if noise is not None:
+                self.noise_24.append(noise)
             if dl_speed is not None:
                 self.measurements_dl_24.append(dl_speed)
             if ul_speed is not None:
                 self.measurements_ul_24.append(ul_speed)
         else:
             self.measurements_5.append(rssi)
+            if noise is not None:
+                self.noise_5.append(noise)
             if dl_speed is not None:
                 self.measurements_dl_5.append(dl_speed)
             if ul_speed is not None:
@@ -62,6 +70,19 @@ class MeasurementPoint:
     def get_average_rssi(self, band):
         measurements = self.measurements_24 if band == '2.4' else self.measurements_5
         return round(np.mean(measurements), 1) if measurements else None
+    
+    def get_average_noise(self, band):
+        """NUEVO: Obtener promedio de ruido"""
+        noise_list = self.noise_24 if band == '2.4' else self.noise_5
+        return round(np.mean(noise_list), 1) if noise_list else None
+    
+    def get_average_snr(self, band):
+        """NUEVO: Calcular SNR promedio"""
+        avg_rssi = self.get_average_rssi(band)
+        avg_noise = self.get_average_noise(band)
+        if avg_rssi is not None and avg_noise is not None:
+            return round(avg_rssi - avg_noise, 1)
+        return None
 
     def get_average_speed(self, band, direction='dl'):
         if band == '2.4':
@@ -84,7 +105,7 @@ class WiFiHeatmapGenerator:
         self.system_os = platform.system()
 
     def get_wifi_rssi(self):
-        """Obtiene información WiFi de forma multiplataforma"""
+        """Obtiene información WiFi de forma multiplataforma - ACTUALIZADO con ruido"""
         if self.system_os == "Darwin":  # macOS
             return self._get_wifi_rssi_macos()
         elif self.system_os == "Windows":
@@ -92,10 +113,10 @@ class WiFiHeatmapGenerator:
         elif self.system_os == "Linux":
             return self._get_wifi_rssi_linux()
         else:
-            return None, f"Sistema operativo no soportado: {self.system_os}", None
+            return None, f"Sistema operativo no soportado: {self.system_os}", None, None
 
     def _get_wifi_rssi_macos(self):
-        """Métodos específicos para macOS"""
+        """Métodos específicos para macOS - ACTUALIZADO con ruido"""
         try:
             airport_path = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
             if os.path.exists(airport_path):
@@ -109,12 +130,17 @@ class WiFiHeatmapGenerator:
                         r'^\s*SSID:\s*(.+)', output, re.MULTILINE)
                     channel_match = re.search(
                         r'^\s*channel:\s*(\d+)', output, re.MULTILINE)
+                    # NUEVO: Capturar ruido
+                    noise_match = re.search(
+                        r'^\s*(?:agrCtlNoise|noise):\s*(-?\d+)', output, re.MULTILINE)
+                    
                     if rssi_match and ssid_match and channel_match:
                         rssi = int(rssi_match.group(1))
                         ssid = ssid_match.group(1).strip()
                         channel = int(channel_match.group(1))
                         band = '5' if channel > 14 else '2.4'
-                        return rssi, ssid, band
+                        noise = int(noise_match.group(1)) if noise_match else None
+                        return rssi, ssid, band, noise
         except Exception as e:
             print(f"-> Método 'airport' falló: {e}")
 
@@ -130,19 +156,23 @@ class WiFiHeatmapGenerator:
                 ssid_match = re.search(
                     r'^\s*(.+?):\s*$', network_section, re.MULTILINE)
                 channel_match = re.search(r'Channel:\s*(\d+)', network_section)
+                # NUEVO: Intentar capturar ruido
+                noise_match = re.search(r'Noise:\s*(-?\d+)', network_section)
+                
                 if rssi_match and ssid_match and channel_match:
                     rssi = int(rssi_match.group(1))
                     ssid = ssid_match.group(1).strip()
                     channel = int(channel_match.group(1))
                     band = '5' if channel > 14 else '2.4'
-                    return rssi, ssid, band
+                    noise = int(noise_match.group(1)) if noise_match else None
+                    return rssi, ssid, band, noise
         except Exception as e:
             print(f"-> Método 'system_profiler' falló: {e}")
 
-        return None, "No se pudo obtener el RSSI en macOS", None
+        return None, "No se pudo obtener el RSSI en macOS", None, None
 
     def _get_wifi_rssi_windows(self):
-        """Métodos específicos para Windows"""
+        """Métodos específicos para Windows - ACTUALIZADO con ruido estimado"""
         try:
             result = subprocess.run(['netsh', 'wlan', 'show', 'interfaces'],
                                     capture_output=True, text=True, timeout=10, check=False)
@@ -163,7 +193,9 @@ class WiFiHeatmapGenerator:
                     if channel_match:
                         channel = int(channel_match.group(1))
                         band = '5' if channel > 14 else '2.4'
-                    return rssi, ssid, band
+                    # Windows no proporciona ruido directamente, estimamos un valor típico
+                    noise = -95  # Valor típico de ruido de fondo
+                    return rssi, ssid, band, noise
         except Exception as e:
             print(f"-> Método netsh Windows falló: {e}")
 
@@ -172,14 +204,14 @@ class WiFiHeatmapGenerator:
                                      'NetConnectionStatus=2', 'get', 'Name,NetConnectionID'],
                                     capture_output=True, text=True, timeout=10, check=False)
             if result.returncode == 0:
-                return -50, "Red WiFi Activa", "2.4"
+                return -50, "Red WiFi Activa", "2.4", -95
         except Exception as e:
             print(f"-> Método wmic Windows falló: {e}")
 
-        return None, "No se pudo obtener información WiFi en Windows", None
+        return None, "No se pudo obtener información WiFi en Windows", None, None
 
     def _get_wifi_rssi_linux(self):
-        """Métodos específicos para Linux"""
+        """Métodos específicos para Linux - ACTUALIZADO con ruido"""
         try:
             result = subprocess.run(
                 ['iwconfig'], capture_output=True, text=True, timeout=5, check=False)
@@ -197,17 +229,21 @@ class WiFiHeatmapGenerator:
                             r'ESSID:"([^"]+)"', iface_output)
                         signal_match = re.search(
                             r'Signal level=(-?\d+)', iface_output)
+                        # NUEVO: Capturar ruido
+                        noise_match = re.search(
+                            r'Noise level=(-?\d+)', iface_output)
                         freq_match = re.search(
                             r'Frequency:([\d.]+)', iface_output)
 
                         if ssid_match and signal_match:
                             ssid = ssid_match.group(1)
                             rssi = int(signal_match.group(1))
+                            noise = int(noise_match.group(1)) if noise_match else None
                             band = '2.4'
                             if freq_match:
                                 freq = float(freq_match.group(1))
                                 band = '5' if freq > 4 else '2.4'
-                            return rssi, ssid, band
+                            return rssi, ssid, band, noise
         except Exception as e:
             print(f"-> Método iwconfig Linux falló: {e}")
 
@@ -238,7 +274,9 @@ class WiFiHeatmapGenerator:
                                 if freq_match:
                                     freq_mhz = int(freq_match.group(1))
                                     band = '5' if freq_mhz > 4000 else '2.4'
-                                return rssi, ssid, band
+                                # iw no proporciona ruido directamente
+                                noise = None
+                                return rssi, ssid, band, noise
         except Exception as e:
             print(f"-> Método iw Linux falló: {e}")
 
@@ -257,7 +295,8 @@ class WiFiHeatmapGenerator:
                         if signal_percent.isdigit():
                             rssi = int((int(signal_percent) / 2) - 100)
                             band = '5' if int(freq) > 4000 else '2.4'
-                            return rssi, ssid, band
+                            noise = -95  # Valor estimado típico
+                            return rssi, ssid, band, noise
         except Exception as e:
             print(f"-> Método nmcli Linux falló: {e}")
 
@@ -280,13 +319,13 @@ class WiFiHeatmapGenerator:
                                     if ssid_match:
                                         ssid = ssid_match.group(1)
                                         rssi = int(float(signal_quality)) - 100
-                                        return rssi, ssid, '2.4'
+                                        return rssi, ssid, '2.4', None
                             except:
                                 pass
         except Exception as e:
             print(f"-> Método /proc/net/wireless Linux falló: {e}")
 
-        return None, "No se pudo obtener información WiFi en Linux", None
+        return None, "No se pudo obtener información WiFi en Linux", None, None
     
     def get_wifi_speed(self, server_ip):
         """Ejecuta iperf3 usando la librería de Python para obtener velocidad."""
@@ -347,24 +386,40 @@ class WiFiHeatmapGenerator:
         self.next_point_id += 1
         return new_point
 
-    def add_measurement_to_point(self, point, rssi, band, dl_speed, ul_speed):
-        point.add_measurement(rssi, band, dl_speed, ul_speed)
+    def add_measurement_to_point(self, point, rssi, band, dl_speed, ul_speed, noise=None):
+        """ACTUALIZADO para incluir ruido"""
+        point.add_measurement(rssi, band, dl_speed, ul_speed, noise)
         avg_rssi = point.get_average_rssi(band)
         count = point.get_measurement_count(band)
         avg_dl = point.get_average_speed(band, 'dl')
         avg_ul = point.get_average_speed(band, 'ul')
-        print(f"[Medición] Punto ID: {point.id} | Banda: {band}GHz | RSSI: {rssi}dBm | DL: {dl_speed} Mbps | UL: {ul_speed} Mbps")
-        print(f"  -> Promedios ({count}x): RSSI: {avg_rssi}dBm | DL: {avg_dl} Mbps | UL: {avg_ul} Mbps")
+        avg_noise = point.get_average_noise(band)
+        avg_snr = point.get_average_snr(band)
+        
+        print(f"[Medición] Punto ID: {point.id} | Banda: {band}GHz | RSSI: {rssi}dBm | Ruido: {noise}dBm | DL: {dl_speed} Mbps | UL: {ul_speed} Mbps")
+        print(f"  -> Promedios ({count}x): RSSI: {avg_rssi}dBm | Ruido: {avg_noise}dBm | SNR: {avg_snr}dB | DL: {avg_dl} Mbps | UL: {avg_ul} Mbps")
 
     def generate_heatmap_data(self, band, data_type='rssi', speed_direction='dl', resolution=100):
-        """Genera datos de mapa de calor para RSSI o velocidad."""
+        """Genera datos de mapa de calor para RSSI, ruido, SNR o velocidad."""
         if data_type == 'rssi':
             valid_points = [p for p in self.measurement_points.values() 
                         if p.get_average_rssi(band) is not None]
             if len(valid_points) < 4:
                 raise ValueError(f"Se necesitan al menos 4 puntos con RSSI para la banda {band} GHz.")
             values = np.array([p.get_average_rssi(band) for p in valid_points])
-        else:
+        elif data_type == 'noise':
+            valid_points = [p for p in self.measurement_points.values() 
+                        if p.get_average_noise(band) is not None]
+            if len(valid_points) < 4:
+                raise ValueError(f"Se necesitan al menos 4 puntos con ruido para la banda {band} GHz.")
+            values = np.array([p.get_average_noise(band) for p in valid_points])
+        elif data_type == 'snr':
+            valid_points = [p for p in self.measurement_points.values() 
+                        if p.get_average_snr(band) is not None]
+            if len(valid_points) < 4:
+                raise ValueError(f"Se necesitan al menos 4 puntos con SNR para la banda {band} GHz.")
+            values = np.array([p.get_average_snr(band) for p in valid_points])
+        else:  # speed
             valid_points = [p for p in self.measurement_points.values() 
                         if p.get_average_speed(band, speed_direction) is not None]
             if len(valid_points) < 4:
@@ -379,6 +434,7 @@ class WiFiHeatmapGenerator:
         return xi, yi, zi
 
     def plot_heatmap_on_floor_plan(self, band, floor_plan_path=None, save_path=None):
+        """Mapa de calor original para RSSI"""
         fig, ax = plt.subplots(1, 1, figsize=(12, 9))
         fig.patch.set_facecolor('#f0f0f0')
 
@@ -388,7 +444,7 @@ class WiFiHeatmapGenerator:
                       0, self.floor_plan_dims[0], self.floor_plan_dims[1], 0], aspect='auto')
 
         try:
-            xi, yi, zi = self.generate_heatmap_data(band)
+            xi, yi, zi = self.generate_heatmap_data(band, data_type='rssi')
             im = ax.contourf(xi, yi, zi, levels=15,
                              cmap='RdYlGn_r', vmin=-90, vmax=-30, alpha=0.6)
 
@@ -421,7 +477,362 @@ class WiFiHeatmapGenerator:
             print(f"✅ Mapa guardado: {save_path}")
         plt.show()
 
+    def plot_noise_heatmap(self, band, floor_plan_path=None, save_path=None):
+        """NUEVO: Mapa de calor para ruido"""
+        fig, ax = plt.subplots(1, 1, figsize=(12, 9))
+        fig.patch.set_facecolor('#f0f0f0')
+
+        if floor_plan_path and os.path.exists(floor_plan_path):
+            floor_img = plt.imread(floor_plan_path)
+            ax.imshow(floor_img, extent=[
+                      0, self.floor_plan_dims[0], self.floor_plan_dims[1], 0], aspect='auto')
+
+        try:
+            xi, yi, zi = self.generate_heatmap_data(band, data_type='noise')
+            im = ax.contourf(xi, yi, zi, levels=15,
+                             cmap='coolwarm_r', vmin=-100, vmax=-70, alpha=0.6)
+
+            for p in self.measurement_points.values():
+                if p.get_average_noise(band) is not None:
+                    ax.plot(p.x, p.y, 'ko', markersize=10,
+                            markeredgecolor='white', markeredgewidth=2)
+                    ax.text(p.x, p.y, str(p.id), fontsize=9, ha='center',
+                            va='center', color='white', weight='bold')
+
+            ax.set_title(f'Mapa de Ruido WiFi - Banda {band} GHz\nSSID: {self.current_ssid}', 
+                        fontsize=14, weight='bold')
+            ax.set_xlabel('Posición X (píxeles)', fontsize=12)
+            ax.set_ylabel('Posición Y (píxeles)', fontsize=12)
+            ax.set_xlim(0, self.floor_plan_dims[0])
+            ax.set_ylim(self.floor_plan_dims[1], 0)
+
+            cbar = plt.colorbar(im, ax=ax, orientation='vertical', pad=0.01)
+            cbar.set_label('Nivel de Ruido (dBm)', fontsize=12)
+            ax.grid(True, alpha=0.2, linestyle='--')
+
+        except ValueError as e:
+            ax.text(0.5, 0.5, f'Datos de ruido insuficientes para la banda {band} GHz\n({e})',
+                    ha='center', va='center', transform=ax.transAxes, fontsize=12, color='red')
+            ax.set_title(f'Banda {band} GHz - Error', fontsize=14)
+
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=200, bbox_inches='tight')
+            print(f"✅ Mapa de ruido guardado: {save_path}")
+        plt.show()
+
+    def plot_snr_heatmap(self, band, floor_plan_path=None, save_path=None):
+        """NUEVO: Mapa de calor para SNR"""
+        fig, ax = plt.subplots(1, 1, figsize=(12, 9))
+        fig.patch.set_facecolor('#f0f0f0')
+
+        if floor_plan_path and os.path.exists(floor_plan_path):
+            floor_img = plt.imread(floor_plan_path)
+            ax.imshow(floor_img, extent=[
+                      0, self.floor_plan_dims[0], self.floor_plan_dims[1], 0], aspect='auto')
+
+        try:
+            xi, yi, zi = self.generate_heatmap_data(band, data_type='snr')
+            im = ax.contourf(xi, yi, zi, levels=15,
+                             cmap='viridis', vmin=0, vmax=40, alpha=0.6)
+
+            for p in self.measurement_points.values():
+                if p.get_average_snr(band) is not None:
+                    ax.plot(p.x, p.y, 'ko', markersize=10,
+                            markeredgecolor='white', markeredgewidth=2)
+                    ax.text(p.x, p.y, str(p.id), fontsize=9, ha='center',
+                            va='center', color='white', weight='bold')
+
+            ax.set_title(f'Mapa de Relación Señal-Ruido (SNR) - Banda {band} GHz\nSSID: {self.current_ssid}', 
+                        fontsize=14, weight='bold')
+            ax.set_xlabel('Posición X (píxeles)', fontsize=12)
+            ax.set_ylabel('Posición Y (píxeles)', fontsize=12)
+            ax.set_xlim(0, self.floor_plan_dims[0])
+            ax.set_ylim(self.floor_plan_dims[1], 0)
+
+            cbar = plt.colorbar(im, ax=ax, orientation='vertical', pad=0.01)
+            cbar.set_label('SNR (dB)', fontsize=12)
+            ax.grid(True, alpha=0.2, linestyle='--')
+
+        except ValueError as e:
+            ax.text(0.5, 0.5, f'Datos SNR insuficientes para la banda {band} GHz\n({e})',
+                    ha='center', va='center', transform=ax.transAxes, fontsize=12, color='red')
+            ax.set_title(f'Banda {band} GHz - Error', fontsize=14)
+
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=200, bbox_inches='tight')
+            print(f"✅ Mapa SNR guardado: {save_path}")
+        plt.show()
+
+    def analyze_speed_vs_snr_correlation(self, band='2.4', save_path=None):
+        """NUEVO: Analiza y grafica la correlación entre SNR y velocidad"""
+        points_with_data = []
+        
+        for p in self.measurement_points.values():
+            snr = p.get_average_snr(band)
+            dl_speed = p.get_average_speed(band, 'dl')
+            ul_speed = p.get_average_speed(band, 'ul')
+            
+            if snr is not None and (dl_speed is not None or ul_speed is not None):
+                points_with_data.append({
+                    'point_id': p.id,
+                    'snr': snr,
+                    'dl_speed': dl_speed,
+                    'ul_speed': ul_speed
+                })
+        
+        if len(points_with_data) < 2:
+            print("No hay suficientes datos para análisis de correlación")
+            return
+        
+        # Crear gráfico de correlación
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        fig.suptitle(f'Análisis de Correlación SNR vs Velocidad - Banda {band} GHz', 
+                     fontsize=14, weight='bold')
+        
+        snr_values = [p['snr'] for p in points_with_data]
+        
+        # Gráfico de descarga
+        dl_values = [p['dl_speed'] for p in points_with_data if p['dl_speed'] is not None]
+        snr_dl = [p['snr'] for p in points_with_data if p['dl_speed'] is not None]
+        
+        if dl_values:
+            ax1.scatter(snr_dl, dl_values, c='blue', s=100, alpha=0.6, edgecolors='black')
+            z = np.polyfit(snr_dl, dl_values, 1)
+            p = np.poly1d(z)
+            ax1.plot(snr_dl, p(snr_dl), "r--", alpha=0.8)
+            
+            correlation = np.corrcoef(snr_dl, dl_values)[0, 1]
+            ax1.text(0.05, 0.95, f'Correlación: {correlation:.3f}', 
+                    transform=ax1.transAxes, fontsize=10, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+            
+            for point in points_with_data:
+                if point['dl_speed'] is not None:
+                    ax1.annotate(str(point['point_id']), 
+                               (point['snr'], point['dl_speed']),
+                               fontsize=8, ha='center')
+        
+        ax1.set_xlabel('SNR (dB)', fontsize=11)
+        ax1.set_ylabel('Velocidad de Descarga (Mbps)', fontsize=11)
+        ax1.set_title('Descarga vs SNR', fontsize=12)
+        ax1.grid(True, alpha=0.3)
+        
+        # Gráfico de subida
+        ul_values = [p['ul_speed'] for p in points_with_data if p['ul_speed'] is not None]
+        snr_ul = [p['snr'] for p in points_with_data if p['ul_speed'] is not None]
+        
+        if ul_values:
+            ax2.scatter(snr_ul, ul_values, c='green', s=100, alpha=0.6, edgecolors='black')
+            z = np.polyfit(snr_ul, ul_values, 1)
+            p = np.poly1d(z)
+            ax2.plot(snr_ul, p(snr_ul), "r--", alpha=0.8)
+            
+            correlation = np.corrcoef(snr_ul, ul_values)[0, 1]
+            ax2.text(0.05, 0.95, f'Correlación: {correlation:.3f}', 
+                    transform=ax2.transAxes, fontsize=10, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+            
+            for point in points_with_data:
+                if point['ul_speed'] is not None:
+                    ax2.annotate(str(point['point_id']), 
+                               (point['snr'], point['ul_speed']),
+                               fontsize=8, ha='center')
+        
+        ax2.set_xlabel('SNR (dB)', fontsize=11)
+        ax2.set_ylabel('Velocidad de Subida (Mbps)', fontsize=11)
+        ax2.set_title('Subida vs SNR', fontsize=12)
+        ax2.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=200, bbox_inches='tight')
+            print(f"✅ Análisis de correlación guardado: {save_path}")
+        
+        plt.show()
+    
+    def analyze_speed_vs_rssi_correlation(self, band='2.4', save_path=None):
+        """NUEVO: Analiza la correlación RSSI vs Velocidad para cumplir con el enunciado TCI"""
+        points_with_data = []
+        
+        # Recopilar datos de todos los puntos
+        for p in self.measurement_points.values():
+            rssi = p.get_average_rssi(band)
+            dl_speed = p.get_average_speed(band, 'dl')
+            ul_speed = p.get_average_speed(band, 'ul')
+            
+            if rssi is not None and (dl_speed is not None or ul_speed is not None):
+                points_with_data.append({
+                    'point_id': p.id,
+                    'rssi': rssi,
+                    'dl_speed': dl_speed,
+                    'ul_speed': ul_speed
+                })
+        
+        if len(points_with_data) < 2:
+            print("No hay suficientes datos para análisis de correlación RSSI-Velocidad")
+            return False
+        
+        # Crear figura con dos subplots lado a lado
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7))
+        fig.patch.set_facecolor('#f5f5f5')
+        fig.suptitle(f'Análisis de Correlación: RSSI vs Velocidad - Banda {band} GHz\n' + 
+                     f'SSID: {self.current_ssid}', 
+                     fontsize=16, weight='bold', y=1.02)
+        
+        # === GRÁFICA DE DESCARGA (IZQUIERDA) ===
+        dl_points = [p for p in points_with_data if p['dl_speed'] is not None]
+        if dl_points:
+            rssi_dl = [p['rssi'] for p in dl_points]
+            speed_dl = [p['dl_speed'] for p in dl_points]
+            
+            # Scatter plot
+            scatter1 = ax1.scatter(rssi_dl, speed_dl, c=rssi_dl, cmap='RdYlGn', 
+                                  s=120, alpha=0.7, edgecolors='black', linewidth=1.5)
+            
+            # Línea de tendencia (regresión lineal)
+            z = np.polyfit(rssi_dl, speed_dl, 1)
+            p = np.poly1d(z)
+            x_line = np.linspace(min(rssi_dl), max(rssi_dl), 100)
+            ax1.plot(x_line, p(x_line), "b--", alpha=0.8, linewidth=2, 
+                    label=f'y = {z[0]:.2f}x + {z[1]:.2f}')
+            
+            # Calcular coeficiente de correlación de Pearson
+            correlation = np.corrcoef(rssi_dl, speed_dl)[0, 1]
+            r_squared = correlation ** 2
+            
+            # Añadir etiquetas a cada punto
+            for point in dl_points:
+                ax1.annotate(f"P{point['point_id']}", 
+                           (point['rssi'], point['dl_speed']),
+                           fontsize=9, ha='center', va='bottom',
+                           xytext=(0, 5), textcoords='offset points')
+            
+            # Información estadística en el gráfico
+            stats_text = f'Correlación de Pearson: {correlation:.3f}\n'
+            stats_text += f'R² = {r_squared:.3f}\n'
+            stats_text += f'Puntos medidos: {len(dl_points)}'
+            
+            ax1.text(0.05, 0.95, stats_text, 
+                    transform=ax1.transAxes, fontsize=10, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
+            
+            # Configuración del subplot
+            ax1.set_xlabel('RSSI (dBm)', fontsize=12, weight='bold')
+            ax1.set_ylabel('Velocidad de Descarga (Mbps)', fontsize=12, weight='bold')
+            ax1.set_title('📥 Velocidad de Descarga vs RSSI', fontsize=14, weight='bold', pad=15)
+            ax1.grid(True, alpha=0.3, linestyle='--')
+            ax1.legend(loc='lower right', fontsize=10)
+            
+            # Añadir líneas de referencia para interpretación
+            ax1.axvline(x=-70, color='orange', linestyle=':', alpha=0.5)
+            ax1.axvline(x=-50, color='green', linestyle=':', alpha=0.5)
+            ax1.text(-70, ax1.get_ylim()[1]*0.9, 'Señal\nDébil', fontsize=8, ha='center', color='orange')
+            ax1.text(-50, ax1.get_ylim()[1]*0.9, 'Señal\nFuerte', fontsize=8, ha='center', color='green')
+            
+        else:
+            ax1.text(0.5, 0.5, 'No hay datos de velocidad de descarga',
+                    ha='center', va='center', transform=ax1.transAxes, 
+                    fontsize=12, color='red')
+            ax1.set_title('📥 Velocidad de Descarga vs RSSI - Sin datos', fontsize=14)
+        
+        # === GRÁFICA DE SUBIDA (DERECHA) ===
+        ul_points = [p for p in points_with_data if p['ul_speed'] is not None]
+        if ul_points:
+            rssi_ul = [p['rssi'] for p in ul_points]
+            speed_ul = [p['ul_speed'] for p in ul_points]
+            
+            # Scatter plot
+            scatter2 = ax2.scatter(rssi_ul, speed_ul, c=rssi_ul, cmap='RdYlGn', 
+                                  s=120, alpha=0.7, edgecolors='black', linewidth=1.5)
+            
+            # Línea de tendencia
+            z = np.polyfit(rssi_ul, speed_ul, 1)
+            p = np.poly1d(z)
+            x_line = np.linspace(min(rssi_ul), max(rssi_ul), 100)
+            ax2.plot(x_line, p(x_line), "g--", alpha=0.8, linewidth=2,
+                    label=f'y = {z[0]:.2f}x + {z[1]:.2f}')
+            
+            # Calcular correlación
+            correlation = np.corrcoef(rssi_ul, speed_ul)[0, 1]
+            r_squared = correlation ** 2
+            
+            # Añadir etiquetas
+            for point in ul_points:
+                ax2.annotate(f"P{point['point_id']}", 
+                           (point['rssi'], point['ul_speed']),
+                           fontsize=9, ha='center', va='bottom',
+                           xytext=(0, 5), textcoords='offset points')
+            
+            # Información estadística
+            stats_text = f'Correlación de Pearson: {correlation:.3f}\n'
+            stats_text += f'R² = {r_squared:.3f}\n'
+            stats_text += f'Puntos medidos: {len(ul_points)}'
+            
+            ax2.text(0.05, 0.95, stats_text, 
+                    transform=ax2.transAxes, fontsize=10, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
+            
+            # Configuración
+            ax2.set_xlabel('RSSI (dBm)', fontsize=12, weight='bold')
+            ax2.set_ylabel('Velocidad de Subida (Mbps)', fontsize=12, weight='bold')
+            ax2.set_title('📤 Velocidad de Subida vs RSSI', fontsize=14, weight='bold', pad=15)
+            ax2.grid(True, alpha=0.3, linestyle='--')
+            ax2.legend(loc='lower right', fontsize=10)
+            
+            # Líneas de referencia
+            ax2.axvline(x=-70, color='orange', linestyle=':', alpha=0.5)
+            ax2.axvline(x=-50, color='green', linestyle=':', alpha=0.5)
+            ax2.text(-70, ax2.get_ylim()[1]*0.9, 'Señal\nDébil', fontsize=8, ha='center', color='orange')
+            ax2.text(-50, ax2.get_ylim()[1]*0.9, 'Señal\nFuerte', fontsize=8, ha='center', color='green')
+            
+        else:
+            ax2.text(0.5, 0.5, 'No hay datos de velocidad de subida',
+                    ha='center', va='center', transform=ax2.transAxes, 
+                    fontsize=12, color='red')
+            ax2.set_title('📤 Velocidad de Subida vs RSSI - Sin datos', fontsize=14)
+        
+        # Ajustar diseño
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        
+        # Añadir interpretación de la relación
+        if dl_points or ul_points:
+            interpretation = self._interpret_correlation(correlation if dl_points else 0)
+            fig.text(0.5, 0.01, interpretation, ha='center', fontsize=10, 
+                    style='italic', wrap=True, color='#555')
+        
+        if save_path:
+            plt.savefig(save_path, dpi=200, bbox_inches='tight', facecolor='#f5f5f5')
+            print(f"✅ Análisis de correlación RSSI-Velocidad guardado: {save_path}")
+        
+        plt.show()
+        return True
+    
+    def _interpret_correlation(self, correlation):
+        """Interpreta el valor de correlación para el usuario"""
+        abs_corr = abs(correlation)
+        if abs_corr > 0.8:
+            strength = "muy fuerte"
+        elif abs_corr > 0.6:
+            strength = "fuerte"
+        elif abs_corr > 0.4:
+            strength = "moderada"
+        elif abs_corr > 0.2:
+            strength = "débil"
+        else:
+            strength = "muy débil o inexistente"
+        
+        if correlation > 0:
+            relation = "positiva (mejor señal → mayor velocidad)"
+        else:
+            relation = "negativa (inesperado - verificar interferencias)"
+        
+        return f"La relación entre RSSI y velocidad es {strength} y {relation}"
+
     def save_data(self, fp):
+        """ACTUALIZADO para incluir datos de ruido"""
         data = {
             'ssid': self.current_ssid,
             'timestamp': datetime.now().isoformat(),
@@ -430,6 +841,7 @@ class WiFiHeatmapGenerator:
                 {
                     'id': p.id, 'x': p.x, 'y': p.y,
                     'rssi_2.4': p.measurements_24, 'rssi_5': p.measurements_5,
+                    'noise_2.4': p.noise_24, 'noise_5': p.noise_5,
                     'dl_2.4': p.measurements_dl_24, 'ul_2.4': p.measurements_ul_24,
                     'dl_5': p.measurements_dl_5, 'ul_5': p.measurements_ul_5,
                 } for p in self.measurement_points.values()
@@ -440,6 +852,7 @@ class WiFiHeatmapGenerator:
             print(f"✅ Datos guardados: {fp}")
 
     def load_data(self, fp):
+        """ACTUALIZADO para cargar datos de ruido"""
         with open(fp, 'r') as f:
             data = json.load(f)
         self.current_ssid = data.get('ssid', 'Unknown')
@@ -447,9 +860,10 @@ class WiFiHeatmapGenerator:
 
         for pd in data['points']:
             p = MeasurementPoint(pd['id'], pd['x'], pd['y'])
-            p.measurements_24 = pd.get(
-                'rssi_2.4', pd.get('measurements_2.4', []))
+            p.measurements_24 = pd.get('rssi_2.4', pd.get('measurements_2.4', []))
             p.measurements_5 = pd.get('rssi_5', pd.get('measurements_5', []))
+            p.noise_24 = pd.get('noise_2.4', [])
+            p.noise_5 = pd.get('noise_5', [])
             p.measurements_dl_24 = pd.get('dl_2.4', [])
             p.measurements_ul_24 = pd.get('ul_2.4', [])
             p.measurements_dl_5 = pd.get('dl_5', [])
@@ -458,19 +872,13 @@ class WiFiHeatmapGenerator:
             self.next_point_id = max(self.next_point_id, p.id + 1)
 
     def plot_combined_speed_heatmaps(self, band, floor_plan_path=None, save_path=None):
-        """
-        NUEVO: Genera mapas de calor combinados (descarga y subida) en una sola imagen.
-        Usa seaborn para mejores paletas de colores.
-        """
-        # Crear figura con 2 subplots lado a lado
+        """Genera mapas de calor combinados (descarga y subida) en una sola imagen."""
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 9))
         fig.patch.set_facecolor('#f5f5f5')
         
-        # Paletas de seaborn más distintivas
-        cmap_download = sns.color_palette("rocket_r", as_cmap=True)  # Para descarga
-        cmap_upload = sns.color_palette("mako_r", as_cmap=True)  # Para subida
+        cmap_download = sns.color_palette("rocket_r", as_cmap=True)
+        cmap_upload = sns.color_palette("mako_r", as_cmap=True)
         
-        # Cargar imagen de fondo si existe
         floor_img = None
         if floor_plan_path and os.path.exists(floor_plan_path):
             floor_img = plt.imread(floor_plan_path)
@@ -484,14 +892,11 @@ class WiFiHeatmapGenerator:
             xi_dl, yi_dl, zi_dl = self.generate_heatmap_data(band, data_type='speed', 
                                                              speed_direction='dl')
             
-            # Determinar rango de valores
             vmax_dl = 300 if band == '5' else 100
             
-            # Crear contornos con la paleta de seaborn
             im1 = ax1.contourf(xi_dl, yi_dl, zi_dl, levels=20, 
                               cmap=cmap_download, vmin=0, vmax=vmax_dl, alpha=0.7)
             
-            # Dibujar puntos de medición
             for p in self.measurement_points.values():
                 speed_val = p.get_average_speed(band, 'dl')
                 if speed_val is not None:
@@ -507,7 +912,6 @@ class WiFiHeatmapGenerator:
             ax1.set_xlim(0, self.floor_plan_dims[0])
             ax1.set_ylim(self.floor_plan_dims[1], 0)
             
-            # Barra de colores para descarga
             cbar1 = plt.colorbar(im1, ax=ax1, orientation='vertical', pad=0.02, shrink=0.8)
             cbar1.set_label('Velocidad (Mbps)', fontsize=12, weight='bold')
             cbar1.ax.tick_params(labelsize=10)
@@ -528,14 +932,11 @@ class WiFiHeatmapGenerator:
             xi_ul, yi_ul, zi_ul = self.generate_heatmap_data(band, data_type='speed', 
                                                              speed_direction='ul')
             
-            # Determinar rango de valores (generalmente la subida es más baja)
             vmax_ul = 100 if band == '5' else 50
             
-            # Crear contornos con la paleta de seaborn
             im2 = ax2.contourf(xi_ul, yi_ul, zi_ul, levels=20, 
                               cmap=cmap_upload, vmin=0, vmax=vmax_ul, alpha=0.7)
             
-            # Dibujar puntos de medición
             for p in self.measurement_points.values():
                 speed_val = p.get_average_speed(band, 'ul')
                 if speed_val is not None:
@@ -551,7 +952,6 @@ class WiFiHeatmapGenerator:
             ax2.set_xlim(0, self.floor_plan_dims[0])
             ax2.set_ylim(self.floor_plan_dims[1], 0)
             
-            # Barra de colores para subida
             cbar2 = plt.colorbar(im2, ax=ax2, orientation='vertical', pad=0.02, shrink=0.8)
             cbar2.set_label('Velocidad (Mbps)', fontsize=12, weight='bold')
             cbar2.ax.tick_params(labelsize=10)
@@ -563,7 +963,6 @@ class WiFiHeatmapGenerator:
                     fontsize=12, color='red', weight='bold')
             ax2.set_title(f'Subida - Banda {band} GHz - Error', fontsize=14)
         
-        # Título general de la figura
         fig.suptitle(f'Mapas de Velocidad WiFi - SSID: {self.current_ssid}', 
                     fontsize=18, weight='bold', y=0.98)
         
@@ -579,8 +978,8 @@ class WiFiHeatmapGenerator:
 class WiFiMapperGUI:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("WiFi Heatmap Generator Pro v8 - Con Mapas Combinados")
-        self.root.geometry("1200x850")
+        self.root.title("WiFi Heatmap Generator Pro v9 - Con Análisis de Ruido y SNR")
+        self.root.geometry("1200x900")
         self.root.configure(bg='#2b2b2b')
 
         self.generator = WiFiHeatmapGenerator()
@@ -688,7 +1087,7 @@ class WiFiMapperGUI:
                                     style='Modern.TLabelframe', padding=12)
         file_frame.pack(fill=tk.X, pady=(0, 10))
 
-        ttk.Button(file_frame, text="🏗️ Cargar Plano de Planta",
+        ttk.Button(file_frame, text="🗺️ Cargar Plano de Planta",
                    command=self.load_floor_plan,
                    style='Modern.TButton').pack(fill=tk.X, pady=2)
         ttk.Button(file_frame, text="💾 Guardar Datos",
@@ -743,7 +1142,7 @@ class WiFiMapperGUI:
         buttons_frame = ttk.Frame(measure_frame, style='Modern.TFrame')
         buttons_frame.pack(fill=tk.X, pady=(15, 0))
 
-        self.measure_button = ttk.Button(buttons_frame, text="📍 Medición Simple",
+        self.measure_button = ttk.Button(buttons_frame, text="🔍 Medición Simple",
                                          command=self.measure_selected_point,
                                          style='Success.TButton')
         self.measure_button.pack(fill=tk.X, pady=2)
@@ -773,7 +1172,7 @@ class WiFiMapperGUI:
         self.point_info_label.pack(anchor=tk.W)
 
     def create_map_section(self, parent):
-        """ACTUALIZADO: Sección simplificada para mapas de velocidad combinados"""
+        """ACTUALIZADO: Sección con botones separados para cada tipo de mapa"""
         map_frame = ttk.LabelFrame(parent, text="🗺️ Generar Mapas de Calor",
                                 style='Modern.TLabelframe', padding=12)
         map_frame.pack(fill=tk.X, pady=(0, 10))
@@ -795,24 +1194,45 @@ class WiFiMapperGUI:
         
         ttk.Separator(map_frame, orient='horizontal').pack(fill=tk.X, pady=10)
         
+        # Sección de mapas de señal
+        ttk.Label(map_frame, text="Mapas de Calidad de Señal:",
+                style='Modern.TLabel',
+                font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W, pady=(0, 5))
+        
         # Botón para mapa de RSSI
         ttk.Button(map_frame, text="📊 Generar Mapa de Señal (RSSI)",
                 command=self.generate_map,
-                style='Success.TButton').pack(fill=tk.X, pady=(0, 10))
+                style='Success.TButton').pack(fill=tk.X, pady=(0, 5))
+        
+        # NUEVO: Botón para mapa de ruido
+        ttk.Button(map_frame, text="🔊 Generar Mapa de Ruido",
+                command=self.generate_noise_map,
+                style='Modern.TButton').pack(fill=tk.X, pady=(0, 5))
+        
+        # NUEVO: Botón para mapa de SNR
+        ttk.Button(map_frame, text="📈 Generar Mapa de SNR",
+                command=self.generate_snr_map,
+                style='Modern.TButton').pack(fill=tk.X, pady=(0, 10))
         
         ttk.Separator(map_frame, orient='horizontal').pack(fill=tk.X, pady=10)
         
-        # NUEVO: Un solo botón para mapas de velocidad combinados
+        # Sección de mapas de velocidad
+        ttk.Label(map_frame, text="Mapas de Velocidad:",
+                style='Modern.TLabel',
+                font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W, pady=(0, 5))
+        
         ttk.Button(map_frame, text="🚀 Generar Mapas de Velocidad\n(⬇️ Descarga + ⬆️ Subida)",
                 command=self.generate_combined_speed_maps,
                 style='Success.TButton').pack(fill=tk.X, pady=(0, 5))
         
-        # Nota informativa
-        info_text = "Los mapas de velocidad requieren\nmediciones con iperf3 activado.\nSe generarán ambos mapas juntos."
-        ttk.Label(map_frame, text=info_text,
-                style='Modern.TLabel',
-                font=('Segoe UI', 8),
-                foreground='#95a5a6').pack(pady=(5, 10))
+        # NUEVOS: Botones para análisis de correlación
+        ttk.Button(map_frame, text="📊 Análisis RSSI vs Velocidad",
+                command=self.analyze_rssi_correlation,
+                style='Success.TButton').pack(fill=tk.X, pady=(0, 5))
+        
+        ttk.Button(map_frame, text="📉 Análisis SNR vs Velocidad",
+                command=self.analyze_snr_correlation,
+                style='Modern.TButton').pack(fill=tk.X, pady=(0, 10))
         
         ttk.Separator(map_frame, orient='horizontal').pack(fill=tk.X, pady=10)
         
@@ -820,11 +1240,138 @@ class WiFiMapperGUI:
                 command=self.clear_all,
                 style='Modern.TButton').pack(fill=tk.X)
 
-    def generate_combined_speed_maps(self):
-        """NUEVO: Genera ambos mapas de velocidad (descarga y subida) en una sola imagen"""
+    def generate_noise_map(self):
+        """NUEVO: Genera mapa de ruido"""
         band = self.band_var.get()
         
-        # Verificar que hay datos suficientes para ambos
+        valid_points = [p for p in self.generator.measurement_points.values()
+                        if p.get_average_noise(band) is not None]
+        
+        if len(valid_points) < 4:
+            messagebox.showwarning(
+                "Datos Insuficientes",
+                f"Se necesitan al menos 4 puntos con mediciones de ruido para la banda {band} GHz.\n"
+                f"Actualmente tienes {len(valid_points)} puntos válidos.\n\n"
+                f"Nota: No todos los sistemas proporcionan datos de ruido."
+            )
+            return
+        
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg")],
+            title=f"Guardar Mapa de Ruido - Banda {band} GHz"
+        )
+        
+        if save_path:
+            try:
+                self.generator.plot_noise_heatmap(
+                    band=band,
+                    floor_plan_path=self.floor_image_path,
+                    save_path=save_path
+                )
+                messagebox.showinfo("Éxito", f"Mapa de ruido generado:\n{save_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo generar el mapa de ruido:\n{str(e)}")
+
+    def generate_snr_map(self):
+        """NUEVO: Genera mapa de SNR"""
+        band = self.band_var.get()
+        
+        valid_points = [p for p in self.generator.measurement_points.values()
+                        if p.get_average_snr(band) is not None]
+        
+        if len(valid_points) < 4:
+            messagebox.showwarning(
+                "Datos Insuficientes",
+                f"Se necesitan al menos 4 puntos con mediciones de ruido y señal para calcular SNR.\n"
+                f"Banda {band} GHz - Puntos válidos: {len(valid_points)}"
+            )
+            return
+        
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg")],
+            title=f"Guardar Mapa de SNR - Banda {band} GHz"
+        )
+        
+        if save_path:
+            try:
+                self.generator.plot_snr_heatmap(
+                    band=band,
+                    floor_plan_path=self.floor_image_path,
+                    save_path=save_path
+                )
+                messagebox.showinfo("Éxito", f"Mapa de SNR generado:\n{save_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo generar el mapa de SNR:\n{str(e)}")
+
+    def analyze_rssi_correlation(self):
+        """NUEVO: Analiza correlación entre RSSI y velocidad (requerido por enunciado TCI)"""
+        band = self.band_var.get()
+        
+        # Verificar que hay datos suficientes
+        points_with_speed = [p for p in self.generator.measurement_points.values()
+                            if p.get_average_rssi(band) is not None and 
+                            (p.get_average_speed(band, 'dl') is not None or 
+                             p.get_average_speed(band, 'ul') is not None)]
+        
+        if len(points_with_speed) < 2:
+            messagebox.showwarning(
+                "Datos Insuficientes",
+                f"Se necesitan al menos 2 puntos con mediciones de RSSI y velocidad.\n"
+                f"Banda {band} GHz - Puntos válidos: {len(points_with_speed)}\n\n"
+                f"Asegúrate de:\n"
+                f"1. Tener iperf3 activado al medir\n"
+                f"2. Haber realizado mediciones de velocidad en varios puntos"
+            )
+            return
+        
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg")],
+            title=f"Guardar Análisis RSSI vs Velocidad - Banda {band} GHz"
+        )
+        
+        if save_path:
+            try:
+                success = self.generator.analyze_speed_vs_rssi_correlation(
+                    band=band,
+                    save_path=save_path
+                )
+                if success:
+                    messagebox.showinfo(
+                        "Éxito", 
+                        f"Análisis RSSI-Velocidad generado:\n{save_path}\n\n"
+                        f"Esta gráfica responde a la pregunta del enunciado sobre\n"
+                        f"la relación entre distancia/señal y velocidad."
+                    )
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo generar el análisis RSSI-Velocidad:\n{str(e)}")
+    
+    def analyze_snr_correlation(self):
+        """Analiza correlación entre SNR y velocidad"""
+        band = self.band_var.get()
+        
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg")],
+            title=f"Guardar Análisis SNR vs Velocidad - Banda {band} GHz"
+        )
+        
+        if save_path:
+            try:
+                self.generator.analyze_speed_vs_snr_correlation(
+                    band=band,
+                    save_path=save_path
+                )
+                messagebox.showinfo("Éxito", f"Análisis SNR-Velocidad generado:\n{save_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo generar el análisis:\n{str(e)}")
+
+    def generate_combined_speed_maps(self):
+        """Genera ambos mapas de velocidad (descarga y subida) en una sola imagen"""
+        band = self.band_var.get()
+        
         valid_dl = [p for p in self.generator.measurement_points.values()
                     if p.get_average_speed(band, 'dl') is not None]
         valid_ul = [p for p in self.generator.measurement_points.values()
@@ -844,14 +1391,9 @@ class WiFiMapperGUI:
             )
             return
         
-        # Solicitar ubicación para guardar
         save_path = filedialog.asksaveasfilename(
             defaultextension=".png",
-            filetypes=[
-                ("PNG", "*.png"),
-                ("PDF", "*.pdf"),
-                ("SVG", "*.svg")
-            ],
+            filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg")],
             title=f"Guardar Mapas de Velocidad Combinados - Banda {band} GHz"
         )
         
@@ -862,15 +1404,9 @@ class WiFiMapperGUI:
                     floor_plan_path=self.floor_image_path,
                     save_path=save_path
                 )
-                messagebox.showinfo(
-                    "Éxito",
-                    f"Mapas de velocidad combinados generados:\n{save_path}"
-                )
+                messagebox.showinfo("Éxito", f"Mapas de velocidad combinados generados:\n{save_path}")
             except Exception as e:
-                messagebox.showerror(
-                    "Error al Generar Mapas",
-                    f"No se pudieron generar los mapas de velocidad:\n{str(e)}"
-                )
+                messagebox.showerror("Error", f"No se pudieron generar los mapas de velocidad:\n{str(e)}")
 
     def create_status_section(self, parent):
         status_frame = ttk.LabelFrame(parent, text="Estado del Sistema",
@@ -973,14 +1509,22 @@ class WiFiMapperGUI:
                 try:
                     rssi_value = int(self.rssi_entry.get())
                     selected_band = self.band_var.get()
+                    # En modo manual, estimamos un ruido típico
+                    noise_value = -95
                     self.measurement_queue.put(
-                        ('success', point, rssi_value, selected_band, "Manual", None, None))
+                        ('success', point, rssi_value, selected_band, "Manual", None, None, noise_value))
                 except ValueError:
                     self.measurement_queue.put(
                         ('error', "Valor RSSI manual inválido."))
                     break
             else:
-                rssi, ssid, band = self.generator.get_wifi_rssi()
+                result = self.generator.get_wifi_rssi()
+                if len(result) == 4:
+                    rssi, ssid, band, noise = result
+                else:
+                    rssi, ssid, band = result
+                    noise = None
+                
                 if rssi is None:
                     self.measurement_queue.put(('error', f"Error obteniendo WiFi: {ssid}"))
                     break
@@ -995,7 +1539,7 @@ class WiFiMapperGUI:
                     dl_speed, ul_speed = speeds
 
                 self.measurement_queue.put(
-                    ('success', point, rssi, band, ssid, dl_speed, ul_speed))
+                    ('success', point, rssi, band, ssid, dl_speed, ul_speed, noise))
 
             if iterations > 1 and i < iterations - 1:
                 time.sleep(2)
@@ -1009,14 +1553,14 @@ class WiFiMapperGUI:
                 msg_type = message[0]
 
                 if msg_type == 'success':
-                    _, point, rssi, band, ssid, dl_speed, ul_speed = message
+                    _, point, rssi, band, ssid, dl_speed, ul_speed, noise = message
 
                     if self.generator.current_ssid is None and ssid != "Manual":
                         self.generator.current_ssid = ssid
 
                     self.ssid_label.config(text=f"SSID: {self.generator.current_ssid}")
                     self.generator.add_measurement_to_point(
-                        point, rssi, band, dl_speed, ul_speed)
+                        point, rssi, band, dl_speed, ul_speed, noise)
 
                     self.redraw_all_points()
                     self.highlight_selected_point()
@@ -1028,13 +1572,14 @@ class WiFiMapperGUI:
                     messagebox.showerror("Error de Medición", message[1])
 
                 elif msg_type == 'finished':
-                    self.measure_button.config(state=tk.NORMAL, text="Medición Simple")
-                    self.measure_button_auto.config(state=tk.NORMAL, text="Medición x10 (2seg)")
+                    self.measure_button.config(state=tk.NORMAL, text="🔍 Medición Simple")
+                    self.measure_button_auto.config(state=tk.NORMAL, text="🔄 Medición x10 (2seg)")
 
         finally:
             self.root.after(100, self.process_queue)
 
     def update_point_info(self):
+        """ACTUALIZADO para mostrar ruido y SNR"""
         if not self.selected_point:
             self.point_label.config(text="Punto: Ninguno seleccionado")
             self.point_info_label.config(text="")
@@ -1048,11 +1593,17 @@ class WiFiMapperGUI:
         count_24 = point.get_measurement_count('2.4')
         if count_24 > 0:
             avg_rssi = point.get_average_rssi('2.4')
+            avg_noise = point.get_average_noise('2.4')
+            avg_snr = point.get_average_snr('2.4')
             avg_dl = point.get_average_speed('2.4', 'dl')
             avg_ul = point.get_average_speed('2.4', 'ul')
 
             info_text += f"Banda 2.4 GHz ({count_24} mediciones):\n"
             info_text += f"   RSSI: {avg_rssi} dBm\n"
+            if avg_noise is not None:
+                info_text += f"   Ruido: {avg_noise} dBm\n"
+            if avg_snr is not None:
+                info_text += f"   SNR: {avg_snr} dB\n"
             if avg_dl is not None:
                 info_text += f"   Descarga: {avg_dl} Mbps\n"
             if avg_ul is not None:
@@ -1061,11 +1612,17 @@ class WiFiMapperGUI:
         count_5 = point.get_measurement_count('5')
         if count_5 > 0:
             avg_rssi = point.get_average_rssi('5')
+            avg_noise = point.get_average_noise('5')
+            avg_snr = point.get_average_snr('5')
             avg_dl = point.get_average_speed('5', 'dl')
             avg_ul = point.get_average_speed('5', 'ul')
 
             info_text += f"Banda 5 GHz ({count_5} mediciones):\n"
             info_text += f"   RSSI: {avg_rssi} dBm\n"
+            if avg_noise is not None:
+                info_text += f"   Ruido: {avg_noise} dBm\n"
+            if avg_snr is not None:
+                info_text += f"   SNR: {avg_snr} dB\n"
             if avg_dl is not None:
                 info_text += f"   Descarga: {avg_dl} Mbps\n"
             if avg_ul is not None:
@@ -1147,11 +1704,7 @@ class WiFiMapperGUI:
 
         save_path = filedialog.asksaveasfilename(
             defaultextension=".png",
-            filetypes=[
-                ("PNG", "*.png"),
-                ("PDF", "*.pdf"),
-                ("SVG", "*.svg")
-            ],
+            filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg")],
             title=f"Guardar Mapa de Calor - Banda {band} GHz"
         )
 
@@ -1162,11 +1715,9 @@ class WiFiMapperGUI:
                     floor_plan_path=self.floor_image_path,
                     save_path=save_path
                 )
-                messagebox.showinfo("Éxito",
-                    f"Mapa de calor generado y guardado:\n{save_path}")
+                messagebox.showinfo("Éxito", f"Mapa de calor generado y guardado:\n{save_path}")
             except Exception as e:
-                messagebox.showerror("Error al Generar Mapa",
-                    f"No se pudo generar el mapa:\n{str(e)}")
+                messagebox.showerror("Error", f"No se pudo generar el mapa:\n{str(e)}")
 
     def save_data(self):
         if not self.generator.measurement_points:
@@ -1186,8 +1737,7 @@ class WiFiMapperGUI:
                     f"Datos guardados:\n{file_path}\n\n"
                     f"Puntos guardados: {len(self.generator.measurement_points)}")
             except Exception as e:
-                messagebox.showerror("Error al Guardar",
-                    f"No se pudieron guardar los datos:\n{str(e)}")
+                messagebox.showerror("Error", f"No se pudieron guardar los datos:\n{str(e)}")
 
     def load_data(self):
         file_path = filedialog.askopenfilename(
@@ -1204,7 +1754,7 @@ class WiFiMapperGUI:
                     text=f"Puntos totales: {len(self.generator.measurement_points)}")
                 self.ssid_label.config(text=f"SSID: {self.generator.current_ssid}")
 
-                self.select_point(None)
+                self.selected_point = None
                 self.update_point_info()
 
                 messagebox.showinfo("Éxito",
@@ -1213,8 +1763,7 @@ class WiFiMapperGUI:
                     f"SSID: {self.generator.current_ssid}")
 
             except Exception as e:
-                messagebox.showerror("Error al Cargar",
-                    f"No se pudo cargar el archivo:\n{str(e)}")
+                messagebox.showerror("Error", f"No se pudo cargar el archivo:\n{str(e)}")
 
     def clear_all(self):
         if not self.generator.measurement_points:
@@ -1232,22 +1781,22 @@ class WiFiMapperGUI:
             self.generator.next_point_id = 1
             self.generator.current_ssid = None
 
-            self.select_point(None)
+            self.selected_point = None
             self.redraw_all_points()
             self.count_label.config(text="Puntos totales: 0")
             self.ssid_label.config(text="SSID: (desconocido)")
 
-            messagebox.showinfo("Limpieza Completa",
-                                "Todos los puntos han sido eliminados")
+            messagebox.showinfo("Limpieza Completa", "Todos los puntos han sido eliminados")
 
     def run(self):
         print("\n" + "="*70)
-        print("WiFi Heatmap Generator Pro v8 - Con Mapas Combinados")
+        print("WiFi Heatmap Generator Pro v9 - Con Análisis de Ruido y SNR")
         print("="*70)
         print(f"Sistema Operativo: {platform.system()} {platform.release()}")
         print(f"Python: {platform.python_version()}")
         print(f"Detección WiFi: Habilitada para {platform.system()}")
-        print(f"Paletas de colores: Seaborn (rocket_r, mako_r)")
+        print(f"Análisis de Ruido: Activado")
+        print(f"Análisis SNR: Activado")
         print("="*70)
         print("Listo para usar!")
         print("="*70 + "\n")

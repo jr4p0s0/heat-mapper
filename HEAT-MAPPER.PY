@@ -19,6 +19,7 @@ from queue import Queue
 import time
 import iperf3
 import seaborn as sns
+import csv
 
 # Configurar seaborn
 sns.set_style("whitegrid")
@@ -422,7 +423,7 @@ class WiFiHeatmapGenerator:
         plt.show()
         
     def analyze_speed_vs_rssi_correlation(self, band='2.4', save_path=None):
-        """NUEVO: Analiza la correlación RSSI vs Velocidad para cumplir con el enunciado TCI"""
+        """Visualiza la relación RSSI vs Velocidad sin análisis estadístico"""
         points_with_data = []
         
         # Recopilar datos de todos los puntos
@@ -440,15 +441,15 @@ class WiFiHeatmapGenerator:
                 })
         
         if len(points_with_data) < 2:
-            print("No hay suficientes datos para análisis de correlación RSSI-Velocidad")
+            print("No hay suficientes datos para análisis de RSSI-Velocidad")
             return False
         
         # Crear figura con dos subplots lado a lado
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7))
         fig.patch.set_facecolor('#f5f5f5')
-        fig.suptitle(f'Análisis de Correlación: RSSI vs Velocidad - Banda {band} GHz\n' + 
-                     f'SSID: {self.current_ssid}', 
-                     fontsize=16, weight='bold', y=1.02)
+        fig.suptitle(f'Relación RSSI vs Velocidad - Banda {band} GHz\n' + 
+                    f'SSID: {self.current_ssid}', 
+                    fontsize=16, weight='bold', y=1.02)
         
         # === GRÁFICA DE DESCARGA (IZQUIERDA) ===
         dl_points = [p for p in points_with_data if p['dl_speed'] is not None]
@@ -456,54 +457,49 @@ class WiFiHeatmapGenerator:
             rssi_dl = [p['rssi'] for p in dl_points]
             speed_dl = [p['dl_speed'] for p in dl_points]
             
-            # Scatter plot
+            # Scatter plot simple
             scatter1 = ax1.scatter(rssi_dl, speed_dl, c=rssi_dl, cmap='RdYlGn', 
-                                  s=120, alpha=0.7, edgecolors='black', linewidth=1.5)
-            
-            # Línea de tendencia (regresión lineal)
-            z = np.polyfit(rssi_dl, speed_dl, 1)
-            p = np.poly1d(z)
-            x_line = np.linspace(min(rssi_dl), max(rssi_dl), 100)
-            ax1.plot(x_line, p(x_line), "b--", alpha=0.8, linewidth=2, 
-                    label=f'y = {z[0]:.2f}x + {z[1]:.2f}')
-            
-            # Calcular coeficiente de correlación de Pearson
-            correlation = np.corrcoef(rssi_dl, speed_dl)[0, 1]
-            r_squared = correlation ** 2
+                                s=150, alpha=0.7, edgecolors='black', linewidth=2)
             
             # Añadir etiquetas a cada punto
             for point in dl_points:
                 ax1.annotate(f"P{point['point_id']}", 
-                           (point['rssi'], point['dl_speed']),
-                           fontsize=9, ha='center', va='bottom',
-                           xytext=(0, 5), textcoords='offset points')
+                        (point['rssi'], point['dl_speed']),
+                        fontsize=10, ha='center', va='bottom',
+                        xytext=(0, 8), textcoords='offset points',
+                        weight='bold')
             
-            # Información estadística en el gráfico
-            stats_text = f'Correlación de Pearson: {correlation:.3f}\n'
-            stats_text += f'R² = {r_squared:.3f}\n'
-            stats_text += f'Puntos medidos: {len(dl_points)}'
+            # Información básica
+            info_text = f'Puntos medidos: {len(dl_points)}\n'
+            info_text += f'RSSI: {min(rssi_dl):.1f} a {max(rssi_dl):.1f} dBm\n'
+            info_text += f'Velocidad: {min(speed_dl):.1f} a {max(speed_dl):.1f} Mbps'
             
-            ax1.text(0.05, 0.95, stats_text, 
+            ax1.text(0.05, 0.95, info_text, 
                     transform=ax1.transAxes, fontsize=10, verticalalignment='top',
-                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray'))
             
             # Configuración del subplot
-            ax1.set_xlabel('RSSI (dBm)', fontsize=12, weight='bold')
-            ax1.set_ylabel('Velocidad de Descarga (Mbps)', fontsize=12, weight='bold')
+            ax1.set_xlabel('RSSI (dBm)', fontsize=13, weight='bold')
+            ax1.set_ylabel('Velocidad de Descarga (Mbps)', fontsize=13, weight='bold')
             ax1.set_title('📥 Velocidad de Descarga vs RSSI', fontsize=14, weight='bold', pad=15)
-            ax1.grid(True, alpha=0.3, linestyle='--')
-            ax1.legend(loc='lower right', fontsize=10)
+            ax1.grid(True, alpha=0.3, linestyle='--', linewidth=1)
             
-            # Añadir líneas de referencia para interpretación
-            ax1.axvline(x=-70, color='orange', linestyle=':', alpha=0.5)
-            ax1.axvline(x=-50, color='green', linestyle=':', alpha=0.5)
-            ax1.text(-70, ax1.get_ylim()[1]*0.9, 'Señal\nDébil', fontsize=8, ha='center', color='orange')
-            ax1.text(-50, ax1.get_ylim()[1]*0.9, 'Señal\nFuerte', fontsize=8, ha='center', color='green')
+            # Líneas de referencia opcionales
+            ax1.axvline(x=-70, color='orange', linestyle=':', alpha=0.5, linewidth=2)
+            ax1.axvline(x=-50, color='green', linestyle=':', alpha=0.5, linewidth=2)
+            ax1.text(-70, ax1.get_ylim()[1]*0.95, 'Señal\nDébil', 
+                    fontsize=9, ha='center', color='orange', weight='bold')
+            ax1.text(-50, ax1.get_ylim()[1]*0.95, 'Señal\nFuerte', 
+                    fontsize=9, ha='center', color='green', weight='bold')
+            
+            # Colorbar
+            cbar1 = plt.colorbar(scatter1, ax=ax1)
+            cbar1.set_label('RSSI (dBm)', fontsize=11)
             
         else:
             ax1.text(0.5, 0.5, 'No hay datos de velocidad de descarga',
                     ha='center', va='center', transform=ax1.transAxes, 
-                    fontsize=12, color='red')
+                    fontsize=12, color='red', weight='bold')
             ax1.set_title('📥 Velocidad de Descarga vs RSSI - Sin datos', fontsize=14)
         
         # === GRÁFICA DE SUBIDA (DERECHA) ===
@@ -512,68 +508,57 @@ class WiFiHeatmapGenerator:
             rssi_ul = [p['rssi'] for p in ul_points]
             speed_ul = [p['ul_speed'] for p in ul_points]
             
-            # Scatter plot
+            # Scatter plot simple
             scatter2 = ax2.scatter(rssi_ul, speed_ul, c=rssi_ul, cmap='RdYlGn', 
-                                  s=120, alpha=0.7, edgecolors='black', linewidth=1.5)
-            
-            # Línea de tendencia
-            z = np.polyfit(rssi_ul, speed_ul, 1)
-            p = np.poly1d(z)
-            x_line = np.linspace(min(rssi_ul), max(rssi_ul), 100)
-            ax2.plot(x_line, p(x_line), "g--", alpha=0.8, linewidth=2,
-                    label=f'y = {z[0]:.2f}x + {z[1]:.2f}')
-            
-            # Calcular correlación
-            correlation = np.corrcoef(rssi_ul, speed_ul)[0, 1]
-            r_squared = correlation ** 2
+                                s=150, alpha=0.7, edgecolors='black', linewidth=2)
             
             # Añadir etiquetas
             for point in ul_points:
                 ax2.annotate(f"P{point['point_id']}", 
-                           (point['rssi'], point['ul_speed']),
-                           fontsize=9, ha='center', va='bottom',
-                           xytext=(0, 5), textcoords='offset points')
+                        (point['rssi'], point['ul_speed']),
+                        fontsize=10, ha='center', va='bottom',
+                        xytext=(0, 8), textcoords='offset points',
+                        weight='bold')
             
-            # Información estadística
-            stats_text = f'Correlación de Pearson: {correlation:.3f}\n'
-            stats_text += f'R² = {r_squared:.3f}\n'
-            stats_text += f'Puntos medidos: {len(ul_points)}'
+            # Información básica
+            info_text = f'Puntos medidos: {len(ul_points)}\n'
+            info_text += f'RSSI: {min(rssi_ul):.1f} a {max(rssi_ul):.1f} dBm\n'
+            info_text += f'Velocidad: {min(speed_ul):.1f} a {max(speed_ul):.1f} Mbps'
             
-            ax2.text(0.05, 0.95, stats_text, 
+            ax2.text(0.05, 0.95, info_text, 
                     transform=ax2.transAxes, fontsize=10, verticalalignment='top',
-                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray'))
             
             # Configuración
-            ax2.set_xlabel('RSSI (dBm)', fontsize=12, weight='bold')
-            ax2.set_ylabel('Velocidad de Subida (Mbps)', fontsize=12, weight='bold')
+            ax2.set_xlabel('RSSI (dBm)', fontsize=13, weight='bold')
+            ax2.set_ylabel('Velocidad de Subida (Mbps)', fontsize=13, weight='bold')
             ax2.set_title('📤 Velocidad de Subida vs RSSI', fontsize=14, weight='bold', pad=15)
-            ax2.grid(True, alpha=0.3, linestyle='--')
-            ax2.legend(loc='lower right', fontsize=10)
+            ax2.grid(True, alpha=0.3, linestyle='--', linewidth=1)
             
             # Líneas de referencia
-            ax2.axvline(x=-70, color='orange', linestyle=':', alpha=0.5)
-            ax2.axvline(x=-50, color='green', linestyle=':', alpha=0.5)
-            ax2.text(-70, ax2.get_ylim()[1]*0.9, 'Señal\nDébil', fontsize=8, ha='center', color='orange')
-            ax2.text(-50, ax2.get_ylim()[1]*0.9, 'Señal\nFuerte', fontsize=8, ha='center', color='green')
+            ax2.axvline(x=-70, color='orange', linestyle=':', alpha=0.5, linewidth=2)
+            ax2.axvline(x=-50, color='green', linestyle=':', alpha=0.5, linewidth=2)
+            ax2.text(-70, ax2.get_ylim()[1]*0.95, 'Señal\nDébil', 
+                    fontsize=9, ha='center', color='orange', weight='bold')
+            ax2.text(-50, ax2.get_ylim()[1]*0.95, 'Señal\nFuerte', 
+                    fontsize=9, ha='center', color='green', weight='bold')
+            
+            # Colorbar
+            cbar2 = plt.colorbar(scatter2, ax=ax2)
+            cbar2.set_label('RSSI (dBm)', fontsize=11)
             
         else:
             ax2.text(0.5, 0.5, 'No hay datos de velocidad de subida',
                     ha='center', va='center', transform=ax2.transAxes, 
-                    fontsize=12, color='red')
+                    fontsize=12, color='red', weight='bold')
             ax2.set_title('📤 Velocidad de Subida vs RSSI - Sin datos', fontsize=14)
         
         # Ajustar diseño
         plt.tight_layout(rect=[0, 0, 1, 0.96])
         
-        # Añadir interpretación de la relación
-        if dl_points or ul_points:
-            interpretation = self._interpret_correlation(correlation if dl_points else 0)
-            fig.text(0.5, 0.01, interpretation, ha='center', fontsize=10, 
-                    style='italic', wrap=True, color='#555')
-        
         if save_path:
             plt.savefig(save_path, dpi=200, bbox_inches='tight', facecolor='#f5f5f5')
-            print(f"✅ Análisis de correlación RSSI-Velocidad guardado: {save_path}")
+            print(f"✅ Gráfica RSSI-Velocidad guardada: {save_path}")
         
         plt.show()
         return True
@@ -855,11 +840,14 @@ class WiFiMapperGUI:
         ttk.Button(file_frame, text="🗺️ Cargar Plano de Planta",
                    command=self.load_floor_plan,
                    style='Modern.TButton').pack(fill=tk.X, pady=2)
-        ttk.Button(file_frame, text="💾 Guardar Datos",
+        ttk.Button(file_frame, text="💾 Guardar Datos (.json)",
                    command=self.save_data,
                    style='Modern.TButton').pack(fill=tk.X, pady=2)
         ttk.Button(file_frame, text="📂 Cargar Datos",
                    command=self.load_data,
+                   style='Modern.TButton').pack(fill=tk.X, pady=2)
+        ttk.Button(file_frame, text="💽 Exportar a CSV/Excel",
+                   command=self.export_to_csv,
                    style='Modern.TButton').pack(fill=tk.X, pady=2)
 
     def create_measurement_section(self, parent):
@@ -987,9 +975,43 @@ class WiFiMapperGUI:
         
         ttk.Separator(map_frame, orient='horizontal').pack(fill=tk.X, pady=10)
         
-        ttk.Button(map_frame, text="Limpiar Todos los Puntos",
+        ttk.Button(map_frame, text="🗑️ Eliminar Punto Seleccionado",
+                command=self.delete_selected_point,
+                style='Modern.TButton').pack(fill=tk.X, pady=(10, 0))
+        
+        ttk.Button(map_frame, text="❌ Limpiar Todos los Puntos",
                 command=self.clear_all,
                 style='Modern.TButton').pack(fill=tk.X)
+        
+        
+    def delete_selected_point(self):
+        """Elimina el punto actualmente seleccionado."""
+        if not self.selected_point:
+            messagebox.showwarning("Sin Selección", "Por favor, selecciona un punto en el mapa para eliminarlo.")
+            return
+        
+        point_id_to_delete = self.selected_point.id
+        
+        confirm = messagebox.askyesno(
+            "Confirmar Eliminación",
+            f"¿Estás seguro de que quieres eliminar el Punto {point_id_to_delete}?\n\nEsta acción no se puede deshacer."
+        )
+
+        if confirm:
+            try:
+                # Eliminar el punto del diccionario
+                del self.generator.measurement_points[point_id_to_delete]
+                
+                # Deseleccionar y actualizar la UI
+                self.selected_point = None
+                self.redraw_all_points()
+                self.update_point_info()
+                self.count_label.config(text=f"Puntos totales: {len(self.generator.measurement_points)}")
+                
+                print(f"Punto {point_id_to_delete} eliminado.")
+            
+            except KeyError:
+                messagebox.showerror("Error", f"No se pudo encontrar el Punto {point_id_to_delete} para eliminarlo.")
 
     def analyze_rssi_correlation(self):
         """NUEVO: Analiza correlación entre RSSI y velocidad (requerido por enunciado TCI)"""
@@ -1210,6 +1232,7 @@ class WiFiMapperGUI:
 
         self.measurement_queue.put(('finished',))
 
+
     def process_queue(self):
         try:
             while not self.measurement_queue.empty():
@@ -1219,10 +1242,25 @@ class WiFiMapperGUI:
                 if msg_type == 'success':
                     _, point, rssi, band, ssid, dl_speed, ul_speed = message
 
+                    
                     if self.generator.current_ssid is None and ssid != "Manual":
+                        # Es la primera medición, guardamos el SSID como referencia
                         self.generator.current_ssid = ssid
+                        self.ssid_label.config(text=f"SSID: {self.generator.current_ssid}")
+                    
+                    elif ssid != "Manual" and self.generator.current_ssid != ssid:
+                        # ¡El SSID ha cambiado! Mostramos un aviso.
+                        messagebox.showwarning(
+                            "Aviso: Cambio de SSID",
+                            f"Se ha detectado una red diferente ('{ssid}').\n\n"
+                            f"Las mediciones se seguirán añadiendo al mapa actual de '{self.generator.current_ssid}'.\n\n"
+                            "Se recomienda guardar y empezar un nuevo mapa para esta red."
+                        )
+                        # Opcionalmente, se podría actualizar el SSID principal, pero es mejor solo avisar.
+                        # self.generator.current_ssid = ssid 
+                        # self.ssid_label.config(text=f"SSID: {self.generator.current_ssid}")
 
-                    self.ssid_label.config(text=f"SSID: {self.generator.current_ssid}")
+                    
                     self.generator.add_measurement_to_point(
                         point, rssi, band, dl_speed, ul_speed)
 
@@ -1438,6 +1476,51 @@ class WiFiMapperGUI:
             self.ssid_label.config(text="SSID: (desconocido)")
 
             messagebox.showinfo("Limpieza Completa", "Todos los puntos han sido eliminados")
+            
+            
+    def export_to_csv(self):
+        """Exporta los datos de los puntos a un fichero CSV."""
+        if not self.generator.measurement_points:
+            messagebox.showwarning("Sin Datos", "No hay puntos de medición para exportar.")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV (delimitado por comas)", "*.csv")],
+            title="Exportar Datos a CSV"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                
+                # Escribir la cabecera
+                writer.writerow([
+                    'ID_Punto', 'Coord_X', 'Coord_Y',
+                    'RSSI_Promedio_2.4GHz', 'Velocidad_DL_Promedio_2.4GHz', 'Velocidad_UL_Promedio_2.4GHz',
+                    'RSSI_Promedio_5GHz', 'Velocidad_DL_Promedio_5GHz', 'Velocidad_UL_Promedio_5GHz'
+                ])
+
+                # Escribir los datos de cada punto
+                for point in self.generator.measurement_points.values():
+                    row = [
+                        point.id, point.x, point.y,
+                        point.get_average_rssi('2.4') or 'N/A',
+                        point.get_average_speed('2.4', 'dl') or 'N/A',
+                        point.get_average_speed('2.4', 'ul') or 'N/A',
+                        point.get_average_rssi('5') or 'N/A',
+                        point.get_average_speed('5', 'dl') or 'N/A',
+                        point.get_average_speed('5', 'ul') or 'N/A'
+                    ]
+                    writer.writerow(row)
+            
+            messagebox.showinfo("Éxito", f"Datos exportados correctamente a:\n{file_path}")
+
+        except Exception as e:
+            messagebox.showerror("Error de Exportación", f"No se pudo guardar el fichero CSV:\n{str(e)}")
 
     def run(self):
         print("\n" + "="*70)

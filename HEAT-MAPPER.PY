@@ -288,18 +288,29 @@ class WiFiHeatmapGenerator:
         return None, "No se pudo obtener información WiFi en Linux", None, None
     
     def get_wifi_speed(self, server_ip):
-        """Ejecuta iperf3 usando la librería de Python para obtener velocidad."""
+        """Ejecuta iperf3 adaptándose al sistema operativo"""
+        
+        # En macOS, usar subprocess por problemas con la librería Python
+        if self.system_os == "Darwin":
+            return self._get_wifi_speed_subprocess(server_ip)
+        else:
+            # En Windows/Linux, usar la librería Python
+            return self._get_wifi_speed_library(server_ip)
+
+    def _get_wifi_speed_library(self, server_ip):
+        """Usa la librería iperf3 de Python (Windows/Linux)"""
         dl_mbps, ul_mbps = None, None
         
         try:
-            print(f"Ejecutando iperf3 (descarga) contra el servidor {server_ip}...")
             client = iperf3.Client()
             client.server_hostname = server_ip
             client.port = 5201
             client.duration = 5
             client.protocol = 'tcp'
-            client.reverse = True
             
+            # Test de descarga
+            print(f"Ejecutando iperf3 (descarga) contra el servidor {server_ip}...")
+            client.reverse = True
             result_dl = client.run()
             
             if result_dl.error:
@@ -308,15 +319,10 @@ class WiFiHeatmapGenerator:
             dl_mbps = round(result_dl.received_Mbps, 2)
             print(f"-> Velocidad de Descarga: {dl_mbps} Mbps")
             
+            # Test de subida
             print(f"Ejecutando iperf3 (subida) contra el servidor {server_ip}...")
-            client2 = iperf3.Client()
-            client2.server_hostname = server_ip
-            client2.port = 5201
-            client2.duration = 5
-            client2.protocol = 'tcp'
-            client2.reverse = False
-            
-            result_ul = client2.run()
+            client.reverse = False
+            result_ul = client.run()
             
             if result_ul.error:
                 return None, f"Error en test de subida: {result_ul.error}"
@@ -334,6 +340,50 @@ class WiFiHeatmapGenerator:
                 return None, "Error: Tiempo de espera agotado."
             else:
                 return None, f"Error inesperado: {error_msg}"
+        
+        return (dl_mbps, ul_mbps), None
+
+    def _get_wifi_speed_subprocess(self, server_ip):
+        """Usa el comando iperf3 del sistema (macOS)"""
+        dl_mbps, ul_mbps = None, None
+        
+        try:
+            # Test de descarga
+            print(f"Ejecutando iperf3 (descarga) contra el servidor {server_ip}...")
+            result_dl = subprocess.run(
+                ['iperf3', '-c', server_ip, '-t', '5', '-R', '-J'],
+                capture_output=True, text=True, timeout=10
+            )
+            
+            if result_dl.returncode == 0:
+                data_dl = json.loads(result_dl.stdout)
+                dl_mbps = round(data_dl['end']['sum_received']['bits_per_second'] / 1_000_000, 2)
+                print(f"-> Velocidad de Descarga: {dl_mbps} Mbps")
+            else:
+                return None, "Error en test de descarga"
+            
+            # Test de subida
+            print(f"Ejecutando iperf3 (subida) contra el servidor {server_ip}...")
+            result_ul = subprocess.run(
+                ['iperf3', '-c', server_ip, '-t', '5', '-J'],
+                capture_output=True, text=True, timeout=10
+            )
+            
+            if result_ul.returncode == 0:
+                data_ul = json.loads(result_ul.stdout)
+                ul_mbps = round(data_ul['end']['sum_sent']['bits_per_second'] / 1_000_000, 2)
+                print(f"-> Velocidad de Subida: {ul_mbps} Mbps")
+            else:
+                return None, "Error en test de subida"
+                
+        except subprocess.TimeoutExpired:
+            return None, "Error: Tiempo de espera agotado"
+        except FileNotFoundError:
+            return None, "Error: iperf3 no está instalado. Ejecuta: brew install iperf3"
+        except json.JSONDecodeError:
+            return None, "Error: No se pudo procesar la respuesta de iperf3"
+        except Exception as e:
+            return None, f"Error inesperado: {str(e)}"
         
         return (dl_mbps, ul_mbps), None
     
@@ -626,8 +676,8 @@ class WiFiHeatmapGenerator:
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 9))
         fig.patch.set_facecolor('#f5f5f5')
         
-        cmap_download = sns.color_palette("rocket_r", as_cmap=True)
-        cmap_upload = sns.color_palette("mako_r", as_cmap=True)
+        cmap_download = sns.color_palette("plasma", as_cmap=True)
+        cmap_upload = sns.color_palette("viridis", as_cmap=True)
         
         floor_img = None
         if floor_plan_path and os.path.exists(floor_plan_path):
@@ -642,10 +692,10 @@ class WiFiHeatmapGenerator:
             xi_dl, yi_dl, zi_dl = self.generate_heatmap_data(band, data_type='speed', 
                                                              speed_direction='dl')
             
-            vmax_dl = 300 if band == '5' else 100
-            
-            im1 = ax1.contourf(xi_dl, yi_dl, zi_dl, levels=20, 
-                              cmap=cmap_download, vmin=0, vmax=vmax_dl, alpha=0.7)
+            vmin_dl = np.nanmin(zi_dl)
+            vmax_dl = np.nanmax(zi_dl)
+
+            im1 = ax1.contourf(xi_dl, yi_dl, zi_dl, levels=20, cmap=cmap_download, vmin=vmin_dl, vmax=vmax_dl, alpha=0.7)
             
             for p in self.measurement_points.values():
                 speed_val = p.get_average_speed(band, 'dl')
@@ -682,10 +732,11 @@ class WiFiHeatmapGenerator:
             xi_ul, yi_ul, zi_ul = self.generate_heatmap_data(band, data_type='speed', 
                                                              speed_direction='ul')
             
-            vmax_ul = 100 if band == '5' else 50
-            
-            im2 = ax2.contourf(xi_ul, yi_ul, zi_ul, levels=20, 
-                              cmap=cmap_upload, vmin=0, vmax=vmax_ul, alpha=0.7)
+            # Calcular rango dinámico basado en los datos reales
+            vmin_ul = np.nanmin(zi_ul)
+            vmax_ul = np.nanmax(zi_ul)
+
+            im2 = ax2.contourf(xi_ul, yi_ul, zi_ul, levels=20, cmap=cmap_upload, vmin=vmin_ul, vmax=vmax_ul, alpha=0.7)
             
             for p in self.measurement_points.values():
                 speed_val = p.get_average_speed(band, 'ul')
@@ -1187,7 +1238,20 @@ class WiFiMapperGUI:
     def _measure_thread_task(self, iterations):
         point = self.selected_point
         mode = self.mode_var.get()
+        
+        # Medir velocidad UNA SOLA VEZ al inicio si está activado
+        dl_speed, ul_speed = None, None
+        if self.measure_speed_var.get() and mode != "manual":
+            speeds, error_msg = self.generator.get_wifi_speed(
+                self.iperf_server_ip.get())
+            if error_msg:
+                self.measurement_queue.put(('error', f"Error en medición de velocidad: {error_msg}"))
+                self.measurement_queue.put(('finished',))
+                return
+            dl_speed, ul_speed = speeds
+            print(f"Velocidad medida (se usará para todas las iteraciones): DL={dl_speed} Mbps, UL={ul_speed} Mbps")
 
+        # Ahora hacer las N iteraciones de RSSI
         for i in range(iterations):
             status_text = f"Midiendo {i+1}/{iterations}..."
             self.root.after(0, lambda: self.measure_button.config(text=status_text))
@@ -1197,7 +1261,6 @@ class WiFiMapperGUI:
                 try:
                     rssi_value = int(self.rssi_entry.get())
                     selected_band = self.band_var.get()
-                    # En modo manual, estimamos un ruido típico
                     self.measurement_queue.put(
                         ('success', point, rssi_value, selected_band, "Manual", None, None))
                 except ValueError:
@@ -1215,15 +1278,7 @@ class WiFiMapperGUI:
                     self.measurement_queue.put(('error', f"Error obteniendo WiFi: {ssid}"))
                     break
 
-                dl_speed, ul_speed = None, None
-                if self.measure_speed_var.get():
-                    speeds, error_msg = self.generator.get_wifi_speed(
-                        self.iperf_server_ip.get())
-                    if error_msg:
-                        self.measurement_queue.put(('error', error_msg))
-                        break
-                    dl_speed, ul_speed = speeds
-
+                # Usar la velocidad medida al inicio (no volver a medir)
                 self.measurement_queue.put(
                     ('success', point, rssi, band, ssid, dl_speed, ul_speed))
 
@@ -1247,18 +1302,16 @@ class WiFiMapperGUI:
                         # Es la primera medición, guardamos el SSID como referencia
                         self.generator.current_ssid = ssid
                         self.ssid_label.config(text=f"SSID: {self.generator.current_ssid}")
-                    
-                    elif ssid != "Manual" and self.generator.current_ssid != ssid:
+                    #eliminamos esta sección porque puede ser más interesante guardar la info de ambas bandas en los mismos puntos
+                    #elif ssid != "Manual" and self.generator.current_ssid != ssid:
                         # ¡El SSID ha cambiado! Mostramos un aviso.
-                        messagebox.showwarning(
-                            "Aviso: Cambio de SSID",
-                            f"Se ha detectado una red diferente ('{ssid}').\n\n"
-                            f"Las mediciones se seguirán añadiendo al mapa actual de '{self.generator.current_ssid}'.\n\n"
-                            "Se recomienda guardar y empezar un nuevo mapa para esta red."
-                        )
-                        # Opcionalmente, se podría actualizar el SSID principal, pero es mejor solo avisar.
-                        # self.generator.current_ssid = ssid 
-                        # self.ssid_label.config(text=f"SSID: {self.generator.current_ssid}")
+                     #   messagebox.showwarning(
+                      #      "Aviso: Cambio de SSID",
+                       #     f"Se ha detectado una red diferente ('{ssid}').\n\n"
+                        #    f"Las mediciones se seguirán añadiendo al mapa actual de '{self.generator.current_ssid}'.\n\n"
+                         #   "Se recomienda guardar y empezar un nuevo mapa para esta red."
+                        #)
+                        
 
                     
                     self.generator.add_measurement_to_point(

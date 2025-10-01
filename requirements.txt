@@ -22,9 +22,6 @@ iperf3
 # Visualización gráficas
 seaborn
 
-# Importación csv
-csv
-
 # === DEPENDENCIAS OPCIONALES ===
 # Mejoran la experiencia pero no son críticas
 

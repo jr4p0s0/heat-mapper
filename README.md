@@ -41,7 +41,7 @@ Generador de mapas de calor WiFi multiplataforma con interfaz moderna. Compatibl
 
 ### Dependencias Python
 ```bash
-pip install matplotlib numpy scipy pillow iperf3 seaborn csv
+pip install matplotlib numpy scipy pillow iperf3 seaborn
 ```
 
 ### Herramientas del Sistema

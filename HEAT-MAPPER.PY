@@ -859,14 +859,31 @@ class WiFiMapperGUI:
         main_frame.grid(row=0, column=0, sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
+        
+        left_canvas = tk.Canvas(main_frame, width=280, bg='#2b2b2b', highlightthickness=0)
+        left_scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=left_canvas.yview)
 
         left_panel = ttk.Frame(main_frame, style='Modern.TFrame', width=280)
         left_panel.grid(row=0, column=0, sticky="ns", padx=(0, 15))
         left_panel.grid_propagate(False)
 
+        left_panel.bind(
+            "<Configure>",
+            lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+        )
+        
+        # Crear ventana dentro del canvas
+        left_canvas.create_window((0, 0), window=left_panel, anchor="nw")
+        left_canvas.configure(yscrollcommand=left_scrollbar.set)
+        
+        # Posicionar el canvas y scrollbar
+        left_canvas.grid(row=0, column=0, sticky="ns")
+        left_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        # Panel derecho (el canvas del mapa)
         right_panel = ttk.Frame(main_frame, relief=tk.SUNKEN, borderwidth=2)
-        right_panel.grid(row=0, column=1, sticky="nsew")
-        main_frame.columnconfigure(1, weight=1)
+        right_panel.grid(row=0, column=2, sticky="nsew", padx=(15, 0))
+        main_frame.columnconfigure(2, weight=1)
         main_frame.rowconfigure(0, weight=1)
 
         self.create_file_section(left_panel)
@@ -874,6 +891,15 @@ class WiFiMapperGUI:
         self.create_point_info_section(left_panel)
         self.create_map_section(left_panel)
         self.create_status_section(left_panel)
+        
+        def _on_mousewheel(event):
+            left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        left_canvas.bind_all("<MouseWheel>", _on_mousewheel)  # Windows
+        left_canvas.bind_all("<Button-4>", lambda e: left_canvas.yview_scroll(-1, "units"))  # Linux scroll up
+        left_canvas.bind_all("<Button-5>", lambda e: left_canvas.yview_scroll(1, "units"))   # Linux scroll down
+
+        self.canvas = tk.Canvas(right_panel, bg='#f8f9fa', highlightthickness=0)
 
         self.canvas = tk.Canvas(right_panel, bg='#f8f9fa', highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)

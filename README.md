@@ -33,6 +33,10 @@ Generador de mapas de calor WiFi multiplataforma con interfaz moderna. Compatibl
 - 🏗️ Superposición en planos de planta
 - 💾 Exportación en PNG, PDF, SVG
 
+### 📈 **Gráficas Intensidad vs. Velocidad**
+- Gráfica relacionando intensidad con velocidad de subida
+- Gráfica relacionando intensidad con velocidad de bajada
+
 ## 📋 Requisitos
 
 ### Dependencias Python
@@ -106,10 +110,21 @@ python HEAT-MAPPER.py
 - **Modo Manual**: Introducir RSSI personalizado
 - **📍 Medición Simple**: 1 medición
 - **🔄 Medición x10**: 10 mediciones con pausa de 2s
+- **Si durante las mediciones se detecta un cambio en el SSID, se notificará para eviar errores**
 
 #### **Paso 4: Generar Mapa**
 - Seleccionar banda (2.4GHz o 5GHz)
 - Clic en "🎨 Generar Mapa de Calor"
+- Elegir ubicación para guardar
+
+#### **Paso 5: Generar Mapas velocidad**
+- Seleccionar banda (2.4GHz o 5GHz)
+- Clic en "🚀 Generar Mapas de Velocidad (Descarga + Subida)"
+- Elegir ubicación para guardar
+
+#### **Paso 6: Generar gráficas**
+- Seleccionar banda (2.4GHz o 5GHz)
+- Clic en "Análisis RSSI vs Velocidad"
 - Elegir ubicación para guardar
 
 ## 🔧 Configuración de iperf3 (Opcional)

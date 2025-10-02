@@ -1475,14 +1475,54 @@ class WiFiMapperGUI:
             filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg")],
             title=f"Guardar Mapa de Calor - Banda {band} GHz"
         )
+        
+        # TO-DO IMPLEMENTADO: Crear versión atenuada del plano de planta
+        lightened_floor_path = None
+        if self.floor_image_path and os.path.exists(self.floor_image_path):
+            try:
+                # Crear archivo temporal para la imagen aclarada
+                import tempfile
+                temp_dir = tempfile.gettempdir()
+                temp_filename = f"lightened_floor_{datetime.now().strftime('%H%M%S')}.png"
+                lightened_floor_path = os.path.join(temp_dir, temp_filename)
+                
+                # Abrir y aclarar la imagen
+                with Image.open(self.floor_image_path) as img:
+                    # Convertir a RGBA si no lo está
+                    if img.mode != 'RGBA':
+                        img = img.convert('RGBA')
+                    
+                    # Crear una capa blanca semitransparente para aclarar
+                    overlay = Image.new('RGBA', img.size, (255, 255, 255, 180))  # 180/255 = ~70% opacidad
+                    
+                    # Combinar la imagen original con la capa blanca
+                    lightened = Image.alpha_composite(img, overlay)
+                    
+                    # Guardar la imagen aclarada temporalmente
+                    lightened.save(lightened_floor_path, 'PNG')
+                    
+            except Exception as e:
+                print(f"No se pudo aclarar la imagen: {e}")
+                lightened_floor_path = self.floor_image_path  # Usar imagen original como fallback
 
         if save_path:
             try:
+                # Usar la imagen aclarada si se creó correctamente
+                floor_to_use = lightened_floor_path if lightened_floor_path else self.floor_image_path
+                
                 self.generator.plot_heatmap_on_floor_plan(
                     band=band,
-                    floor_plan_path=self.floor_image_path,
+                    floor_plan_path=floor_to_use,
                     save_path=save_path
                 )
+                
+                # Limpiar archivo temporal si se creó
+                if lightened_floor_path and lightened_floor_path != self.floor_image_path:
+                    try:
+                        os.remove(lightened_floor_path)
+                    except:
+                        pass  # No es crítico si no se puede borrar
+            
                 messagebox.showinfo("Éxito", f"Mapa de calor generado y guardado:\n{save_path}")
             except Exception as e:
                 messagebox.showerror("Error", f"No se pudo generar el mapa:\n{str(e)}")

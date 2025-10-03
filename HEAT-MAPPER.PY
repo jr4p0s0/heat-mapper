@@ -77,6 +77,8 @@ class WiFiHeatmapGenerator:
         self.floor_plan_dims = None
         self.next_point_id = 1
         self.system_os = platform.system()
+        self.download_speed_range = (0, 600)  # Mbps
+        self.upload_speed_range = (0, 200)    # Mbps
 
     def get_wifi_rssi(self):
         """Obtiene información WiFi de forma multiplataforma - ACTUALIZADO con ruido"""
@@ -672,7 +674,7 @@ class WiFiHeatmapGenerator:
             self.next_point_id = max(self.next_point_id, p.id + 1)
 
     def plot_combined_speed_heatmaps(self, band, floor_plan_path=None, save_path=None):
-        """Genera mapas de calor combinados (descarga y subida) en una sola imagen."""
+        """Genera mapas de calor combinados (descarga y subida) con rangos fijos."""
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 9))
         fig.patch.set_facecolor('#f5f5f5')
         
@@ -686,16 +688,17 @@ class WiFiHeatmapGenerator:
         # === MAPA DE DESCARGA (IZQUIERDA) ===
         if floor_img is not None:
             ax1.imshow(floor_img, extent=[0, self.floor_plan_dims[0], 
-                                          self.floor_plan_dims[1], 0], aspect='auto', alpha=0.7)
+                                        self.floor_plan_dims[1], 0], aspect='auto', alpha=0.7)
         
         try:
             xi_dl, yi_dl, zi_dl = self.generate_heatmap_data(band, data_type='speed', 
-                                                             speed_direction='dl')
+                                                            speed_direction='dl')
             
-            vmin_dl = np.nanmin(zi_dl)
-            vmax_dl = np.nanmax(zi_dl)
+            # USAR RANGOS FIJOS para descarga
+            vmin_dl, vmax_dl = self.download_speed_range
 
-            im1 = ax1.contourf(xi_dl, yi_dl, zi_dl, levels=20, cmap=cmap_download, vmin=vmin_dl, vmax=vmax_dl, alpha=0.7)
+            im1 = ax1.contourf(xi_dl, yi_dl, zi_dl, levels=20, cmap=cmap_download, 
+                            vmin=vmin_dl, vmax=vmax_dl, alpha=0.7)
             
             for p in self.measurement_points.values():
                 speed_val = p.get_average_speed(band, 'dl')
@@ -706,14 +709,15 @@ class WiFiHeatmapGenerator:
                             va='center', color='black', weight='bold')
             
             ax1.set_title(f'Velocidad de Descarga\nBanda {band} GHz', 
-                         fontsize=16, weight='bold', pad=15)
+                        fontsize=16, weight='bold', pad=15)
             ax1.set_xlabel('Posición X (píxeles)', fontsize=12)
             ax1.set_ylabel('Posición Y (píxeles)', fontsize=12)
             ax1.set_xlim(0, self.floor_plan_dims[0])
             ax1.set_ylim(self.floor_plan_dims[1], 0)
             
             cbar1 = plt.colorbar(im1, ax=ax1, orientation='vertical', pad=0.02, shrink=0.8)
-            cbar1.set_label('Velocidad (Mbps)', fontsize=12, weight='bold')
+            cbar1.set_label(f'Velocidad (Mbps)\nRango: {vmin_dl}-{vmax_dl} Mbps', 
+                        fontsize=12, weight='bold')
             cbar1.ax.tick_params(labelsize=10)
             ax1.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
             
@@ -726,17 +730,17 @@ class WiFiHeatmapGenerator:
         # === MAPA DE SUBIDA (DERECHA) ===
         if floor_img is not None:
             ax2.imshow(floor_img, extent=[0, self.floor_plan_dims[0], 
-                                          self.floor_plan_dims[1], 0], aspect='auto', alpha=0.7)
+                                        self.floor_plan_dims[1], 0], aspect='auto', alpha=0.7)
         
         try:
             xi_ul, yi_ul, zi_ul = self.generate_heatmap_data(band, data_type='speed', 
-                                                             speed_direction='ul')
+                                                            speed_direction='ul')
             
-            # Calcular rango dinámico basado en los datos reales
-            vmin_ul = np.nanmin(zi_ul)
-            vmax_ul = np.nanmax(zi_ul)
+            # USAR RANGOS FIJOS para subida
+            vmin_ul, vmax_ul = self.upload_speed_range
 
-            im2 = ax2.contourf(xi_ul, yi_ul, zi_ul, levels=20, cmap=cmap_upload, vmin=vmin_ul, vmax=vmax_ul, alpha=0.7)
+            im2 = ax2.contourf(xi_ul, yi_ul, zi_ul, levels=20, cmap=cmap_upload, 
+                            vmin=vmin_ul, vmax=vmax_ul, alpha=0.7)
             
             for p in self.measurement_points.values():
                 speed_val = p.get_average_speed(band, 'ul')
@@ -747,14 +751,15 @@ class WiFiHeatmapGenerator:
                             va='center', color='black', weight='bold')
             
             ax2.set_title(f'Velocidad de Subida\nBanda {band} GHz', 
-                         fontsize=16, weight='bold', pad=15)
+                        fontsize=16, weight='bold', pad=15)
             ax2.set_xlabel('Posición X (píxeles)', fontsize=12)
             ax2.set_ylabel('Posición Y (píxeles)', fontsize=12)
             ax2.set_xlim(0, self.floor_plan_dims[0])
             ax2.set_ylim(self.floor_plan_dims[1], 0)
             
             cbar2 = plt.colorbar(im2, ax=ax2, orientation='vertical', pad=0.02, shrink=0.8)
-            cbar2.set_label('Velocidad (Mbps)', fontsize=12, weight='bold')
+            cbar2.set_label(f'Velocidad (Mbps)\nRango: {vmin_ul}-{vmax_ul} Mbps', 
+                        fontsize=12, weight='bold')
             cbar2.ax.tick_params(labelsize=10)
             ax2.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
             

@@ -789,6 +789,8 @@ class WiFiMapperGUI:
         self.floor_image_path = None
         self.selected_point = None
         self.measurement_queue = Queue()
+        self.floor_image_original= None
+        self.opacity_value = 100
 
         self.setup_modern_style()
         self.setup_gui()
@@ -915,17 +917,104 @@ class WiFiMapperGUI:
         file_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Button(file_frame, text="🗺️ Cargar Plano de Planta",
-                   command=self.load_floor_plan,
-                   style='Modern.TButton').pack(fill=tk.X, pady=2)
+                command=self.load_floor_plan,
+                style='Modern.TButton').pack(fill=tk.X, pady=2)
+        
+        # NUEVO: Control de opacidad del plano
+        opacity_frame = ttk.Frame(file_frame, style='Modern.TFrame')
+        opacity_frame.pack(fill=tk.X, pady=(10, 5))
+        
+        ttk.Label(opacity_frame, text="Opacidad del plano:",
+                style='Modern.TLabel',
+                font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W)
+        
+        slider_frame = ttk.Frame(opacity_frame, style='Modern.TFrame')
+        slider_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        self.opacity_slider = tk.Scale(
+            slider_frame,
+            from_=0,
+            to=100,
+            orient=tk.HORIZONTAL,
+            command=self.on_opacity_change,
+            bg='#3c3c3c',
+            fg='#ffffff',
+            highlightthickness=0,
+            troughcolor='#2b2b2b',
+            activebackground='#4a90e2'
+        )
+        self.opacity_slider.set(self.opacity_value)
+        self.opacity_slider.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        self.opacity_label = ttk.Label(slider_frame, text="100%",
+                                    style='Modern.TLabel',
+                                    width=5)
+        self.opacity_label.pack(side=tk.RIGHT, padx=(5, 0))
+        
+        ttk.Label(opacity_frame, text="0% = transparente | 100% = opaco",
+                style='Modern.TLabel',
+                font=('Segoe UI', 7)).pack(anchor=tk.W, pady=(2, 0))
+        
         ttk.Button(file_frame, text="💾 Guardar Datos (.json)",
-                   command=self.save_data,
-                   style='Modern.TButton').pack(fill=tk.X, pady=2)
+                command=self.save_data,
+                style='Modern.TButton').pack(fill=tk.X, pady=2)
         ttk.Button(file_frame, text="📂 Cargar Datos",
-                   command=self.load_data,
-                   style='Modern.TButton').pack(fill=tk.X, pady=2)
+                command=self.load_data,
+                style='Modern.TButton').pack(fill=tk.X, pady=2)
         ttk.Button(file_frame, text="💽 Exportar a CSV/Excel",
-                   command=self.export_to_csv,
-                   style='Modern.TButton').pack(fill=tk.X, pady=2)
+                command=self.export_to_csv,
+                style='Modern.TButton').pack(fill=tk.X, pady=2)
+        
+    def on_opacity_change(self, value):
+        """Actualiza la opacidad del plano en tiempo real"""
+        self.opacity_value = int(float(value))
+        self.opacity_label.config(text=f"{self.opacity_value}%")
+        
+        # Actualizar la imagen en el canvas si hay una cargada
+        if self.floor_image_original is not None:
+            self.update_floor_plan_opacity()
+            
+    def update_floor_plan_opacity(self):
+        """Aplica la opacidad actual a la imagen del plano y la muestra"""
+        if self.floor_image_original is None:
+            return
+        
+        try:
+            # Calcular el alpha basado en el porcentaje (0-255)
+            alpha = int((self.opacity_value / 100) * 255)
+            
+            # Crear una copia de la imagen original
+            img = self.floor_image_original.copy()
+            
+            # Convertir a RGBA si no lo está
+            if img.mode != 'RGBA':
+                img = img.convert('RGBA')
+            
+            # Ajustar la transparencia
+            # Obtener los datos de la imagen
+            data = img.getdata()
+            new_data = []
+            for item in data:
+                # Mantener RGB, modificar solo el canal alpha
+                new_data.append((item[0], item[1], item[2], alpha))
+            
+            img.putdata(new_data)
+            
+            # Convertir a PhotoImage para mostrar en el canvas
+            self.floor_image = ImageTk.PhotoImage(img)
+            
+            # Redibujar el canvas
+            self.canvas.delete("all")
+            self.canvas.create_image(0, 0, anchor=tk.NW, image=self.floor_image)
+            
+            # Redibujar todos los puntos encima
+            self.redraw_all_points()
+            if self.selected_point:
+                self.highlight_selected_point()
+                
+        except Exception as e:
+            print(f"Error al actualizar opacidad: {e}")
+    
 
     def create_measurement_section(self, parent):
         measure_frame = ttk.LabelFrame(parent, text="📡 Control de Mediciones",
@@ -1134,7 +1223,6 @@ class WiFiMapperGUI:
                 messagebox.showerror("Error", f"No se pudo generar el análisis RSSI-Velocidad:\n{str(e)}")
 
     def generate_combined_speed_maps(self):
-        """Genera ambos mapas de velocidad (descarga y subida) en una sola imagen"""
         band = self.band_var.get()
         
         valid_dl = [p for p in self.generator.measurement_points.values()
@@ -1148,11 +1236,7 @@ class WiFiMapperGUI:
                 f"Se necesitan al menos 4 puntos con mediciones de velocidad "
                 f"(descarga Y subida) para la banda {band} GHz.\n\n"
                 f"Puntos válidos con descarga: {len(valid_dl)}\n"
-                f"Puntos válidos con subida: {len(valid_ul)}\n\n"
-                f"Asegúrate de:\n"
-                f"1. Tener iperf3 activado al medir\n"
-                f"2. Tener el servidor iperf3 funcionando\n"
-                f"3. Haber realizado mediciones en la banda seleccionada"
+                f"Puntos válidos con subida: {len(valid_ul)}"
             )
             return
         
@@ -1162,38 +1246,36 @@ class WiFiMapperGUI:
             title=f"Guardar Mapas de Velocidad Combinados - Banda {band} GHz"
         )
         
-        # Crear versión atenuada del plano de planta (igual que en generate_map)
+        # Usar la opacidad configurada por el usuario
         lightened_floor_path = None
         if self.floor_image_path and os.path.exists(self.floor_image_path):
             try:
-                # Crear archivo temporal para la imagen aclarada
                 import tempfile
                 temp_dir = tempfile.gettempdir()
-                temp_filename = f"lightened_floor_speed_{datetime.now().strftime('%H%M%S')}.png"
+                temp_filename = f"opacity_floor_speed_{datetime.now().strftime('%H%M%S')}.png"
                 lightened_floor_path = os.path.join(temp_dir, temp_filename)
                 
-                # Abrir y aclarar la imagen
+                alpha = int((self.opacity_value / 100) * 255)
+                
                 with Image.open(self.floor_image_path) as img:
-                    # Convertir a RGBA si no lo está
+                    if self.generator.floor_plan_dims:
+                        img = img.resize(self.generator.floor_plan_dims, Image.Resampling.LANCZOS)
+                    
                     if img.mode != 'RGBA':
                         img = img.convert('RGBA')
                     
-                    # Crear una capa blanca semitransparente para aclarar
-                    overlay = Image.new('RGBA', img.size, (255, 255, 255, 180))  # 180/255 = ~70% opacidad
+                    data = img.getdata()
+                    new_data = [(item[0], item[1], item[2], alpha) for item in data]
+                    img.putdata(new_data)
                     
-                    # Combinar la imagen original con la capa blanca
-                    lightened = Image.alpha_composite(img, overlay)
-                    
-                    # Guardar la imagen aclarada temporalmente
-                    lightened.save(lightened_floor_path, 'PNG')
+                    img.save(lightened_floor_path, 'PNG')
                     
             except Exception as e:
-                print(f"No se pudo aclarar la imagen: {e}")
-                lightened_floor_path = self.floor_image_path  # Usar imagen original como fallback
+                print(f"No se pudo aplicar opacidad: {e}")
+                lightened_floor_path = self.floor_image_path
         
         if save_path:
             try:
-                # Usar la imagen aclarada si se creó correctamente
                 floor_to_use = lightened_floor_path if lightened_floor_path else self.floor_image_path
                 
                 self.generator.plot_combined_speed_heatmaps(
@@ -1202,12 +1284,11 @@ class WiFiMapperGUI:
                     save_path=save_path
                 )
                 
-                # Limpiar archivo temporal si se creó
                 if lightened_floor_path and lightened_floor_path != self.floor_image_path:
                     try:
                         os.remove(lightened_floor_path)
                     except:
-                        pass  # No es crítico si no se puede borrar
+                        pass
                 
                 messagebox.showinfo("Éxito", f"Mapas de velocidad combinados generados:\n{save_path}")
             except Exception as e:
@@ -1249,19 +1330,21 @@ class WiFiMapperGUI:
             canvas_height = max(self.canvas.winfo_height(), 300)
 
             scale_factor = min(canvas_width / image.width,
-                               canvas_height / image.height)
+                            canvas_height / image.height)
             new_width = int(image.width * scale_factor)
             new_height = int(image.height * scale_factor)
 
             image = image.resize((new_width, new_height),
-                                 Image.Resampling.LANCZOS)
+                                Image.Resampling.LANCZOS)
 
-            self.floor_image = ImageTk.PhotoImage(image)
-            self.canvas.delete("all")
-            self.canvas.create_image(0, 0, anchor=tk.NW, image=self.floor_image)
-
+            # Guardar la imagen original redimensionada (SIN modificaciones de opacidad)
+            self.floor_image_original = image.copy()
+            
+            # Establecer las dimensiones
             self.generator.floor_plan_dims = (new_width, new_height)
-            self.redraw_all_points()
+            
+            # Aplicar la opacidad actual y mostrar
+            self.update_floor_plan_opacity()
 
             messagebox.showinfo("Éxito", f"Plano cargado correctamente\nDimensiones: {new_width}x{new_height}")
 
@@ -1516,38 +1599,39 @@ class WiFiMapperGUI:
             title=f"Guardar Mapa de Calor - Banda {band} GHz"
         )
         
-        # TO-DO IMPLEMENTADO: Crear versión atenuada del plano de planta
+        # Crear versión con opacidad personalizada
         lightened_floor_path = None
         if self.floor_image_path and os.path.exists(self.floor_image_path):
             try:
-                # Crear archivo temporal para la imagen aclarada
                 import tempfile
                 temp_dir = tempfile.gettempdir()
-                temp_filename = f"lightened_floor_{datetime.now().strftime('%H%M%S')}.png"
+                temp_filename = f"opacity_floor_{datetime.now().strftime('%H%M%S')}.png"
                 lightened_floor_path = os.path.join(temp_dir, temp_filename)
                 
-                # Abrir y aclarar la imagen
+                # Usar la opacidad configurada por el usuario
+                alpha = int((self.opacity_value / 100) * 255)
+                
                 with Image.open(self.floor_image_path) as img:
-                    # Convertir a RGBA si no lo está
+                    # Redimensionar a las dimensiones del canvas
+                    if self.generator.floor_plan_dims:
+                        img = img.resize(self.generator.floor_plan_dims, Image.Resampling.LANCZOS)
+                    
                     if img.mode != 'RGBA':
                         img = img.convert('RGBA')
                     
-                    # Crear una capa blanca semitransparente para aclarar
-                    overlay = Image.new('RGBA', img.size, (255, 255, 255, 180))  # 180/255 = ~70% opacidad
+                    # Aplicar opacidad
+                    data = img.getdata()
+                    new_data = [(item[0], item[1], item[2], alpha) for item in data]
+                    img.putdata(new_data)
                     
-                    # Combinar la imagen original con la capa blanca
-                    lightened = Image.alpha_composite(img, overlay)
-                    
-                    # Guardar la imagen aclarada temporalmente
-                    lightened.save(lightened_floor_path, 'PNG')
+                    img.save(lightened_floor_path, 'PNG')
                     
             except Exception as e:
-                print(f"No se pudo aclarar la imagen: {e}")
-                lightened_floor_path = self.floor_image_path  # Usar imagen original como fallback
+                print(f"No se pudo aplicar opacidad a la imagen: {e}")
+                lightened_floor_path = self.floor_image_path
 
         if save_path:
             try:
-                # Usar la imagen aclarada si se creó correctamente
                 floor_to_use = lightened_floor_path if lightened_floor_path else self.floor_image_path
                 
                 self.generator.plot_heatmap_on_floor_plan(
@@ -1556,12 +1640,11 @@ class WiFiMapperGUI:
                     save_path=save_path
                 )
                 
-                # Limpiar archivo temporal si se creó
                 if lightened_floor_path and lightened_floor_path != self.floor_image_path:
                     try:
                         os.remove(lightened_floor_path)
                     except:
-                        pass  # No es crítico si no se puede borrar
+                        pass
             
                 messagebox.showinfo("Éxito", f"Mapa de calor generado y guardado:\n{save_path}")
             except Exception as e:
